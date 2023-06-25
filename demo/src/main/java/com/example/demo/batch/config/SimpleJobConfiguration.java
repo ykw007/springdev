@@ -8,7 +8,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.Step;
 import org.springframework.batch.core.configuration.JobRegistry;
-
+import org.springframework.batch.core.configuration.annotation.JobScope;
+import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.core.configuration.support.JobRegistryBeanPostProcessor;
 import org.springframework.batch.core.job.builder.JobBuilder;
 import org.springframework.batch.core.launch.support.RunIdIncrementer;
@@ -57,6 +58,7 @@ public class SimpleJobConfiguration {
     }
 
     @Bean
+    @StepScope
     public SimpleTasklet simpleTasklet() {
         log.info("Building tasklet");
         var tasklet = new SimpleTasklet(jdbcTemplate);

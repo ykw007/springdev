@@ -48,9 +48,10 @@ public class SimpleTasklet implements Tasklet {
         .map(Path::toFile) // convert Path to File object
         .sorted((a, b) -> Long.compare(a.lastModified(), b.lastModified())) // sort files date
         .limit(500) // limit processing to 500 files (optional)
-        .forEachOrdered(f -> {
+        .forEach(f -> { // 병렬 스트림인 경우 순서가 보장되지 않음
+        //.forEachOrdered(f -> { // 병렬 스트림인 경우에도 순서가 보장됨
 
-            log.info(f.getName());
+            log.info(f.getName()+ " " + Thread.currentThread().getName());
             
             Integer count2 = jdbcTemplate.queryForObject(
             		"select count(*) from people", Integer.class);
