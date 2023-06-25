@@ -43,10 +43,21 @@ public class QuartzJob extends QuartzJobBean implements InterruptableJob {
          //job 내의 파라미터가 모두 동일한 경우 1회만 실행되고 중복 job 으로 분류되어 실행이 불가.
          //currentTime을 파라미터에 추가하여 이를 방지.
          JobParametersBuilder jpb = new JobParametersBuilder();
-         jpb.addLong("currTime", System.currentTimeMillis());
+         jpb.addLong("currTime", System.nanoTime());
          Job job = jobLocator.getJob(jobName);
          
          jobLauncher.run(job, jpb.toJobParameters());  //batch job 실행
+         
+/*
+         for(int i = 0 ; i < 20; i++) {
+             jpb = new JobParametersBuilder();
+             jpb.addLong("currTime", System.nanoTime());
+             job = jobLocator.getJob(jobName);
+             
+             jobLauncher.run(job, jpb.toJobParameters());  //batch job 실행
+             
+         }
+         */
          
       } catch (Exception e) {
          log.error("ex in job execute: {}", e.getMessage());

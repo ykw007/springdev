@@ -1,4 +1,4 @@
-package com.example.demo.batch.job;
+package com.example.demo.batch.config;
 
 
 import lombok.extern.slf4j.Slf4j;
