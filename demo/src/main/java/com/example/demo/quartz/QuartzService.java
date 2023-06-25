@@ -39,8 +39,8 @@ public class QuartzService {
             scheduler.getListenerManager().addJobListener(new QuartzJobListener());
             scheduler.getListenerManager().addTriggerListener(new QuartzTriggerListener());
 
-            addJob(QuartzJob.class, "importUserJob", "importUserJob1 입니다", null , "0/10 * * * * ?");
-            //addJob(QuartzJob.class, "importUserJob", "importUserJob2 입니다", null , "0/10 * * * * ?");
+            //addJob(QuartzJob.class, "importUserJob", "importUserJob1 입니다", null , "0/10 * * * * ?");
+            addJob(QuartzJob.class, "simpleJob", "simpleJob 입니다", null , "0/10 * * * * ?");
             //addJob(QuartzJob.class, "importUserJob", "importUserJob3 입니다", null , "0/10 * * * * ?");
             //addJob(QuartzJob.class, "exampleJob", "exampleJob 입니다", null , "0/30 * * * * ?");
 

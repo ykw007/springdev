@@ -6,6 +6,7 @@ import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.JobExecution;
 import org.springframework.batch.core.JobExecutionListener;
 import org.springframework.beans.factory.annotation.Autowired;
+
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Component;
@@ -17,9 +18,8 @@ public class JobCompletionNotificationListener implements JobExecutionListener {
 
 	private final JdbcTemplate jdbcTemplate;
 	
-	@Autowired
-	private ThreadPoolTaskExecutor taskExecutor;
-	
+	@Autowired	
+	private ThreadPoolTaskExecutor taskExecutor;	
 
 	@Autowired
 	public JobCompletionNotificationListener(JdbcTemplate jdbcTemplate) {
@@ -36,6 +36,8 @@ public class JobCompletionNotificationListener implements JobExecutionListener {
 			//		rs.getString(1),
 			//		rs.getString(2))
 			//).forEach(person -> log.info("Found <" + person + "> in the database."));
+		}else {
+			log.info("!!! JOB FAILED!!! jobid : "+jobExecution.getJobId());
 		}
 		//taskExecutor.shutdown();
 	}
