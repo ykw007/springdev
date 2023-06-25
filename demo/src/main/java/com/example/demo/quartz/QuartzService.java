@@ -30,7 +30,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class QuartzService {
     private final Scheduler scheduler;
-    public static final String JOB_ANME = "JOB_NAME";
+    public static final String JOB_NANE = "JOB_NAME";
 
     @PostConstruct
     public void init() {
@@ -39,8 +39,8 @@ public class QuartzService {
             scheduler.getListenerManager().addJobListener(new QuartzJobListener());
             scheduler.getListenerManager().addTriggerListener(new QuartzTriggerListener());
 
-            addJob(QuartzJob.class, "createJob1", "createJob1 입니다", null , "0/30 * * * * ?");
-            addJob(QuartzJob.class, "createJob2", "createJob2 입니다", null , "0/30 * * * * ?");
+            addJob(QuartzJob.class, "SampleJob", "createJob1 입니다", null , "0/30 * * * * ?");
+            addJob(QuartzJob.class, "exampleJob", "exampleJob 입니다", null , "0/30 * * * * ?");
 
 
         } catch (Exception e){
@@ -61,7 +61,7 @@ public class QuartzService {
     //JobDetail 생성
     public <T extends Job> JobDetail buildJobDetail(Class<? extends Job> job, String name, String desc, Map paramsMap) {
         JobDataMap jobDataMap = new JobDataMap();
-        jobDataMap.put(JOB_ANME, name);
+        jobDataMap.put(JOB_NANE, name);
         jobDataMap.put("executeCount", 1);
 
 
