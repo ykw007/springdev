@@ -1,8 +1,11 @@
 package com.example.demo.batch.config;
 
+import java.io.File;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.concurrent.ForkJoinPool;
 import java.util.stream.Collectors;
 
 import org.springframework.batch.core.StepContribution;
@@ -41,23 +44,44 @@ public class SimpleTasklet implements Tasklet {
         		"select count(*) from people", Integer.class);
         log.info(count.toString());
 
-        Files.walk(Paths.get("./src/main/resources/input/")) // create a stream of paths
-        .collect(Collectors.toList()) // collect paths into list to better parallize
-        .parallelStream() // process this stream in multiple threads
-        .filter(Files::isRegularFile) // filter out any non-files (such as directories)
-        .map(Path::toFile) // convert Path to File object
-        .sorted((a, b) -> Long.compare(a.lastModified(), b.lastModified())) // sort files date
-        .limit(500) // limit processing to 500 files (optional)
-        .forEach(f -> { // 병렬 스트림인 경우 순서가 보장되지 않음
-        //.forEachOrdered(f -> { // 병렬 스트림인 경우에도 순서가 보장됨
+        ForkJoinPool customThreadPool = new ForkJoinPool(4);
+        
+        customThreadPool.submit(()->
+        {
+			try {
+				Files.walk(Paths.get("./src/main/resources/input/")) // 경로 스트림 생성
+				.collect(Collectors.toList()) // 더 나은 병렬화를 위해 경로를 목록으로 수집
+				.parallelStream() // 여러 스레드에서 이 스트림 처리
+				.filter(Files::isRegularFile) // 파일이 아닌 디렉토리 필터링
+				.map(Path::toFile) // 경로를 파일 객체로 변환
+				.parallel()
+				.sorted((a, b) -> Long.compare(a.lastModified(), b.lastModified())) // 정렬 파일 날짜
+				.limit(100) // 처리 파일로 제한
+				.forEach(f -> { // 병렬 스트림인 경우 순서가 보장되지 않음
+				//.forEachOrdered(f -> { // 병렬 스트림인 경우에도 순서가 보장됨
+					process(f);
 
-            log.info(f.getName()+ " " + Thread.currentThread().getName());
-            
-            Integer count2 = jdbcTemplate.queryForObject(
-            		"select count(*) from people", Integer.class);
-            log.info(">> forEachOrdered 처리시 DB 테스트  :"+count2.toString());
-        });
+				});
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+		}
+        );
+        
+
+        customThreadPool.shutdown();
         
         return RepeatStatus.FINISHED;
+    }
+    
+    private void process(File f) {
+    	
+	    log.info(f.getName()+ " " + Thread.currentThread().getName());
+	    
+	    Integer count2 = jdbcTemplate.queryForObject(
+	    		"select count(*) from people", Integer.class);
+	    log.info(">> 처리시 DB 테스트  :"+count2.toString());
+
     }
 }
