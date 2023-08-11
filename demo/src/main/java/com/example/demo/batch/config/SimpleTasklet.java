@@ -8,6 +8,10 @@ import java.nio.file.Paths;
 import java.util.concurrent.ForkJoinPool;
 import java.util.stream.Collectors;
 
+import org.apache.commons.io.monitor.FileAlterationListener;
+import org.apache.commons.io.monitor.FileAlterationListenerAdaptor;
+import org.apache.commons.io.monitor.FileAlterationMonitor;
+import org.apache.commons.io.monitor.FileAlterationObserver;
 import org.springframework.batch.core.StepContribution;
 import org.springframework.batch.core.scope.context.ChunkContext;
 import org.springframework.batch.core.step.tasklet.Tasklet;
@@ -32,7 +36,7 @@ public class SimpleTasklet implements Tasklet {
     public RepeatStatus execute(StepContribution  stepContribution, ChunkContext chunkContext) throws Exception {
         log.info(">>> parallel stream test");
         
-        
+        /*
         Path currentPath = Paths.get("");
         String path = currentPath.toAbsolutePath().toString();
         
@@ -71,6 +75,11 @@ public class SimpleTasklet implements Tasklet {
         
 
         customThreadPool.shutdown();
+        */
+        
+
+
+
         
         return RepeatStatus.FINISHED;
     }
