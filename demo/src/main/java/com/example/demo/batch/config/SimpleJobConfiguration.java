@@ -25,7 +25,6 @@ import org.springframework.transaction.PlatformTransactionManager;
 
 @Slf4j
 @Configuration
-@RequiredArgsConstructor
 public class SimpleJobConfiguration {
 
     @Autowired
@@ -48,6 +47,7 @@ public class SimpleJobConfiguration {
 
     
 	@Bean
+	@JobScope
 	@Qualifier("step")
     public Step step(JobRepository jobRepository, PlatformTransactionManager transactionManager, Tasklet tasklet1) {
         log.info("Building step");
