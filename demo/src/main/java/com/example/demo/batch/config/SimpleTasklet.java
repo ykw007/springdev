@@ -88,10 +88,10 @@ public class SimpleTasklet implements Tasklet {
 
 			});
 			*/
-			for(int i = 0;i < 10;i++) {
+			for(int i = 0;i < 20;i++) {
 				log.info(">>>>>>>>>>> " + i+ " " + Thread.currentThread().getName());
 				try {
-					Thread.sleep(1000);
+					Thread.sleep(500);
 				} catch (InterruptedException e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
@@ -111,7 +111,7 @@ public class SimpleTasklet implements Tasklet {
         
         //log.info(">>> filename : "+filename+":: aa : "+aa);
         
-		for(int i = 0;i < 10;i++) {
+		for(int i = 0;i < 20;i++) {
 	        //log.info(">>> filename : "+filename+":: for aa : "+aa);
 			//log.info(">>>>>>>>>>> out " + (aa++));
 
@@ -119,12 +119,12 @@ public class SimpleTasklet implements Tasklet {
 	        log.info(">>> jobInstanceId : "+jobInstanceId);
 	        log.info(">>> stepExecution Id : "+stepExecution.getId());
 	        //log.info(">>> stepContext Id : "+stepContext.getId());
-			//try {
-				//Thread.sleep(500);
-			//} catch (InterruptedException e) {
+			try {
+				Thread.sleep(500);
+			} catch (InterruptedException e) {
 				// TODO Auto-generated catch block
-				//e.printStackTrace();
-			//}
+				e.printStackTrace();
+			}
 		}
         
         return RepeatStatus.FINISHED;

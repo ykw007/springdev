@@ -78,7 +78,7 @@ public class QuartzService {
     //Trigger 생성
     private Trigger buildCronTrigger(String cronExp) {
         return TriggerBuilder.newTrigger()
-               // .withSchedule(CronScheduleBuilder.cronSchedule(cronExp))
+                .withSchedule(CronScheduleBuilder.cronSchedule(cronExp))
                 .build();
     }
    }
