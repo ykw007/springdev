@@ -91,7 +91,7 @@ public class SimpleTasklet implements Tasklet {
 			for(int i = 0;i < 20;i++) {
 				log.info(">>>>>>>>>>> " + i+ " " + Thread.currentThread().getName());
 				try {
-					Thread.sleep(500);
+					Thread.sleep(100);
 				} catch (InterruptedException e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
@@ -120,7 +120,7 @@ public class SimpleTasklet implements Tasklet {
 	        log.info(">>> stepExecution Id : "+stepExecution.getId());
 	        //log.info(">>> stepContext Id : "+stepContext.getId());
 			try {
-				Thread.sleep(500);
+				Thread.sleep(100);
 			} catch (InterruptedException e) {
 				// TODO Auto-generated catch block
 				e.printStackTrace();
