@@ -69,4 +69,39 @@ public class FtpDownloadWithTimeoutExample {
         }
     }
 }
+
+
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.LoggerContext;
+import ch.qos.logback.core.rolling.RollingFileAppender;
+import ch.qos.logback.core.rolling.TimeBasedRollingPolicy;
+import org.slf4j.LoggerFactory;
+
+public class LogbackExample {
+
+    public static void main(String[] args) {
+        LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
+        Logger logger = loggerContext.getLogger(LogbackExample.class);
+
+        RollingFileAppender appender = new RollingFileAppender();
+        appender.setContext(loggerContext);
+        appender.setFile("log/test-web.log");
+
+        TimeBasedRollingPolicy rollingPolicy = new TimeBasedRollingPolicy();
+        rollingPolicy.setContext(loggerContext);
+        rollingPolicy.setParent(appender);
+        rollingPolicy.setFileNamePattern("log/test-web.%d{yyyyMMdd}.%i.log");
+        rollingPolicy.setMaxHistory(30); // 최대 보관 주기 설정
+        rollingPolicy.start();
+
+        appender.setRollingPolicy(rollingPolicy);
+        appender.start();
+
+        logger.addAppender(appender);
+
+        // 로그 메시지 출력
+        logger.info("Hello, Logback!");
+    }
+}
+
 */
