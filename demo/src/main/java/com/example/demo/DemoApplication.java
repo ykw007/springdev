@@ -22,85 +22,99 @@ public class DemoApplication {
 import org.apache.commons.net.ftp.FTP;
 import org.apache.commons.net.ftp.FTPClient;
 
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.OutputStream;
+// ...
 
-public class FtpDownloadWithTimeoutExample {
+public class FtpDownloadRetryExample {
+
     public static void main(String[] args) {
         String server = "ftp.example.com";
         int port = 21;
-        String username = "your-username";
-        String password = "your-password";
-        String remoteFilePath = "/path/to/remote/file.txt";
-        String localFilePath = "local-file.txt";
+        String username = "your-ftp-username";
+        String password = "your-ftp-password";
+        String remoteFilePath = "/path/on/ftp/server/file.txt";
+        String localFilePath = "path/to/local/file.txt";
 
-        try (FTPClient ftpClient = new FTPClient()) {
-            // Set connection timeout (in milliseconds)
-            ftpClient.setConnectTimeout(5000); // 5 seconds
-
+        FTPClient ftpClient = new FTPClient();
+        try {
             ftpClient.connect(server, port);
             ftpClient.login(username, password);
-            ftpClient.enterLocalPassiveMode();
             ftpClient.setFileType(FTP.BINARY_FILE_TYPE);
 
-            // Set control connection keep-alive timeout (in milliseconds)
-            ftpClient.setControlKeepAliveTimeout(30000); // 30 seconds
-
-            // 파일 존재 여부 확인
-            FTPFile[] files = ftpClient.listFiles(remoteFilePath);
-            if (files.length == 0) {
-                System.err.println("File does not exist on the server.");
-                return;
-            }
-
-            try (OutputStream outputStream = new FileOutputStream(localFilePath)) {
-                boolean success = ftpClient.retrieveFile(remoteFilePath, outputStream);
-                if (success) {
-                    System.out.println("File downloaded successfully!");
-                } else {
-                    System.err.println("Error downloading file.");
+            // 파일 다운로드 시도 (3회까지 재시도)
+            int maxRetries = 3;
+            int retryCount = 0;
+            boolean success = false;
+            while (!success && retryCount < maxRetries) {
+                try {
+                    success = ftpClient.retrieveFile(remoteFilePath, new FileOutputStream(localFilePath));
+                } catch (IOException e) {
+                    System.err.println("다운로드 실패: " + e.getMessage());
+                    retryCount++;
+                    Thread.sleep(1000); // 1초 대기 후 재시도
                 }
-            } catch (IOException e) {
-                System.err.println("Error writing to local file: " + e.getMessage());
             }
-        } catch (IOException e) {
-            System.err.println("Error connecting to FTP server: " + e.getMessage());
+
+            if (success) {
+                System.out.println("파일 다운로드 성공!");
+            } else {
+                System.out.println("파일 다운로드 실패 (재시도 횟수 초과)");
+            }
+
+            ftpClient.logout();
+        } catch (IOException | InterruptedException e) {
+            e.printStackTrace();
+        } finally {
+            try {
+                ftpClient.disconnect();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
         }
     }
 }
 
+import org.apache.commons.net.ftp.FTP;
+import org.apache.commons.net.ftp.FTPClient;
 
-import ch.qos.logback.classic.Logger;
-import ch.qos.logback.classic.LoggerContext;
-import ch.qos.logback.core.rolling.RollingFileAppender;
-import ch.qos.logback.core.rolling.TimeBasedRollingPolicy;
-import org.slf4j.LoggerFactory;
+import java.io.FileOutputStream;
+import java.io.IOException;
 
-public class LogbackExample {
+public class FtpDownloadWithTimeoutExample {
 
     public static void main(String[] args) {
-        LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
-        Logger logger = loggerContext.getLogger(LogbackExample.class);
+        String server = "ftp.example.com";
+        int port = 21;
+        String username = "your-ftp-username";
+        String password = "your-ftp-password";
+        String remoteFilePath = "/path/on/ftp/server/file.txt";
+        String localFilePath = "path/to/local/file.txt";
 
-        RollingFileAppender appender = new RollingFileAppender();
-        appender.setContext(loggerContext);
-        appender.setFile("log/test-web.log");
+        FTPClient ftpClient = new FTPClient();
+        try {
+            ftpClient.connect(server, port);
+            ftpClient.login(username, password);
+            ftpClient.setFileType(FTP.BINARY_FILE_TYPE);
 
-        TimeBasedRollingPolicy rollingPolicy = new TimeBasedRollingPolicy();
-        rollingPolicy.setContext(loggerContext);
-        rollingPolicy.setParent(appender);
-        rollingPolicy.setFileNamePattern("log/test-web.%d{yyyyMMdd}.%i.log");
-        rollingPolicy.setMaxHistory(30); // 최대 보관 주기 설정
-        rollingPolicy.start();
+            // 데이터 전송 시간 초과 설정 (10초)
+            ftpClient.setDataTimeout(10000);
 
-        appender.setRollingPolicy(rollingPolicy);
-        appender.start();
+            boolean success = ftpClient.retrieveFile(remoteFilePath, new FileOutputStream(localFilePath));
+            if (success) {
+                System.out.println("파일 다운로드 성공!");
+            } else {
+                System.out.println("파일 다운로드 실패!");
+            }
 
-        logger.addAppender(appender);
-
-        // 로그 메시지 출력
-        logger.info("Hello, Logback!");
+            ftpClient.logout();
+        } catch (IOException e) {
+            e.printStackTrace();
+        } finally {
+            try {
+                ftpClient.disconnect();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
     }
 }
 
