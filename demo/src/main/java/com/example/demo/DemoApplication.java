@@ -61,4 +61,26 @@ public String generateCronExpression(String intervalType, List<String> detailOpt
     return cronExpression;
 }
 
+import org.quartz.CronExpression;
+import java.text.ParseException;
+import java.util.Date;
+
+public class NextExecutionTime {
+    public static Date getNextExecutionTime(String cronExpressionString) {
+        try {
+            CronExpression cronExpression = new CronExpression(cronExpressionString);
+            return cronExpression.getNextValidTimeAfter(new Date());
+        } catch (ParseException e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    public static void main(String[] args) {
+        String cronExpressionString = "0 15 10 ? * MON,TUE,WED,THU,FRI";
+        Date nextExecutionTime = getNextExecutionTime(cronExpressionString);
+        System.out.println("다음 실행 시간: " + nextExecutionTime);
+    }
+}
+
 */
