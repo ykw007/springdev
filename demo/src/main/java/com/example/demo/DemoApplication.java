@@ -315,5 +315,37 @@ endlocal
 
 4. **콘솔 창 유지**:
     - 애플리케이션 종료 시 콘솔 창이 닫히지 않도록 `pause` 명령어를 사용합니다.
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 
+public class DirectoryCreator {
+
+    public static void main(String[] args) {
+        String directoryName = "example";
+        Path createdDirectory = createUniqueDirectory(directoryName);
+        System.out.println("Created Directory: " + createdDirectory.toString());
+    }
+
+    public static Path createUniqueDirectory(String directoryName) {
+        return createUniqueDirectory(Paths.get(directoryName), 0);
+    }
+
+    private static Path createUniqueDirectory(Path directoryPath, int copyIndex) {
+        Path newPath = copyIndex == 0 ? directoryPath : Paths.get(directoryPath.toString() + "_copy" + copyIndex);
+        
+        try {
+            if (!Files.exists(newPath)) {
+                return Files.createDirectory(newPath);
+            } else {
+                // Recurse with incremented copy index if directory already exists
+                return createUniqueDirectory(directoryPath, copyIndex + 1);
+            }
+        } catch (IOException e) {
+            System.err.println("An error occurred while creating the directory: " + e.getMessage());
+            return null;
+        }
+    }
+}
 */
