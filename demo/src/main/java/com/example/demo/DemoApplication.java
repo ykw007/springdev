@@ -348,4 +348,197 @@ public class DirectoryCreator {
         }
     }
 }
+
+
+<dependency>
+    <groupId>commons-net</groupId>
+    <artifactId>commons-net</artifactId>
+    <version>3.8.0</version>
+</dependency>
+```
+
+### FTP 세션 관리 클래스
+
+아래 코드는 FTP 연결 세션을 이름으로 관리하는 Java 클래스입니다.
+
+```java
+import org.apache.commons.net.ftp.FTP;
+import org.apache.commons.net.ftp.FTPClient;
+import java.io.IOException;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.util.HashMap;
+import java.util.Map;
+
+public class FtpSessionManager {
+    private Map<String, FTPClient> sessions = new HashMap<>();
+
+    /**
+     * 세션을 생성하고 FTP 서버에 연결합니다.
+     * @param sessionName 세션의 이름
+     * @param server 서버 주소
+     * @param port 포트 번호
+     * @param user 사용자 이름
+     * @param pass 비밀번호
+     * @throws IOException 연결 실패 시 예외 발생
+     */
+    public void createSession(String sessionName, String server, int port, String user, String pass) throws IOException {
+        FTPClient ftpClient = new FTPClient();
+        ftpClient.connect(server, port);
+
+        if (ftpClient.login(user, pass)) {
+            ftpClient.enterLocalPassiveMode();
+            ftpClient.setFileType(FTP.BINARY_FILE_TYPE);
+            sessions.put(sessionName, ftpClient);
+            System.out.println("Session " + sessionName + " created and connected to server.");
+        } else {
+            throw new IOException("Failed to login to FTP server");
+        }
+    }
+
+    /**
+     * 지정된 이름의 세션을 닫고 연결을 종료합니다.
+     * @param sessionName 세션의 이름
+     * @throws IOException 세션이 없거나 종료 실패 시 예외 발생
+     */
+    public void closeSession(String sessionName) throws IOException {
+        FTPClient ftpClient = sessions.get(sessionName);
+        if (ftpClient != null && ftpClient.isConnected()) {
+            ftpClient.logout();
+            ftpClient.disconnect();
+            sessions.remove(sessionName);
+            System.out.println("Session " + sessionName + " closed.");
+        } else {
+            throw new IOException("Session " + sessionName + " not found or already closed.");
+        }
+    }
+
+    /**
+     * 파일을 업로드합니다.
+     * @param sessionName 세션의 이름
+     * @param localFilePath 로컬 파일 경로
+     * @param remoteFilePath 원격 파일 경로
+     * @throws IOException 파일 전송 실패 시 예외 발생
+     */
+    public void uploadFile(String sessionName, String localFilePath, String remoteFilePath) throws IOException {
+        FTPClient ftpClient = sessions.get(sessionName);
+        if (ftpClient != null) {
+            try (FileInputStream fis = new FileInputStream(localFilePath)) {
+                boolean success = ftpClient.storeFile(remoteFilePath, fis);
+                if (success) {
+                    System.out.println("File uploaded successfully to " + remoteFilePath);
+                } else {
+                    throw new IOException("Failed to upload file to " + remoteFilePath);
+                }
+            }
+        } else {
+            throw new IOException("Session " + sessionName + " not found.");
+        }
+    }
+
+    /**
+     * 파일을 다운로드합니다.
+     * @param sessionName 세션의 이름
+     * @param remoteFilePath 원격 파일 경로
+     * @param localFilePath 로컬 파일 경로
+     * @throws IOException 파일 다운로드 실패 시 예외 발생
+     */
+    public void downloadFile(String sessionName, String remoteFilePath, String localFilePath) throws IOException {
+        FTPClient ftpClient = sessions.get(sessionName);
+        if (ftpClient != null) {
+            try (FileOutputStream fos = new FileOutputStream(localFilePath)) {
+                boolean success = ftpClient.retrieveFile(remoteFilePath, fos);
+                if (success) {
+                    System.out.println("File downloaded successfully to " + localFilePath);
+                } else {
+                    throw new IOException("Failed to download file from " + remoteFilePath);
+                }
+            }
+        } else {
+            throw new IOException("Session " + sessionName + " not found.");
+        }
+    }
+
+    public static void main(String[] args) {
+        FtpSessionManager manager = new FtpSessionManager();
+        
+        try {
+            // 세션 생성
+            manager.createSession("mySession", "ftp.example.com", 21, "user", "pass");
+            
+            // 파일 업로드
+            manager.uploadFile("mySession", "C:/local/path/to/file.txt", "/remote/path/file.txt");
+            
+            // 파일 다운로드
+            manager.downloadFile("mySession", "/remote/path/file.txt", "C:/local/path/to/downloaded_file.txt");
+            
+            // 세션 종료
+            manager.closeSession("mySession");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+}
+
+
+
+
+import org.apache.commons.net.ftp.FTPClient;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
+
+@Component
+public class FtpSessionManager {
+
+    @Value("${ftp.server}")
+    private String server;
+
+    @Value("${ftp.port}")
+    private int port;
+
+    @Value("${ftp.user}")
+    private String user;
+
+    @Value("${ftp.password}")
+    private String password;
+
+    private Map<String, FTPClient> sessionMap = new HashMap<>();
+
+    public FTPClient createSession(String sessionName) throws IOException {
+        FTPClient ftpClient = new FTPClient();
+        ftpClient.connect(server, port);
+        ftpClient.login(user, password);
+        ftpClient.enterLocalPassiveMode();
+        sessionMap.put(sessionName, ftpClient);
+        return ftpClient;
+    }
+
+    public FTPClient getSession(String sessionName) {
+        return sessionMap.get(sessionName);
+    }
+
+    public void closeSession(String sessionName) throws IOException {
+        FTPClient ftpClient = sessionMap.get(sessionName);
+        if (ftpClient != null && ftpClient.isConnected()) {
+            ftpClient.logout();
+            ftpClient.disconnect();
+            sessionMap.remove(sessionName);
+        }
+    }
+
+    public void closeAllSessions() throws IOException {
+        for (FTPClient ftpClient : sessionMap.values()) {
+            if (ftpClient.isConnected()) {
+                ftpClient.logout();
+                ftpClient.disconnect();
+            }
+        }
+        sessionMap.clear();
+    }
+}
+
 */
