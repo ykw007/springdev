@@ -188,5 +188,20 @@ public class DrawImageServiceImpl implements DrawImageService {
     }
 }
 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>이미지 표시</title>
+</head>
+<body>
+    <h1>이미지 그리기</h1>
+
+    <!-- 파일 경로에 따라 이미지 생성 -->
+    <img src="<c:url value='/drawImage?filePath=/path/to/your/file.csv' />" alt="Generated Image" />
+
+</body>
+</html>
 
 */
