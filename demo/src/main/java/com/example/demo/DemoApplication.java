@@ -19,526 +19,174 @@ public class DemoApplication {
 
 }
 /*
-import java.util.ArrayList;
-import java.util.List;
 
-public String generateCronExpression(String intervalType, List<String> detailOptions, String startTime) {
-    String cronExpression = "";
+package com.example.demo.controller;
 
-    if (intervalType.equals("At Once")) {
-        String[] time = startTime.split(":");
-        cronExpression = time[1] + " " + time[0] + " * * *";
-    } else if (intervalType.equals("Daily")) {
-        String[] time = startTime.split(":");
-        cronExpression = time[1] + " " + time[0] + " * * *";
-    } else if (intervalType.equals("Weekly")) {
-        String[] time = startTime.split(":");
-        List<String> daysOfWeek = new ArrayList<>();
-        for (String day : detailOptions) {
-            switch (day) {
-                case "SUN":
-                case "MON":
-                case "TUE":
-                case "WED":
-                case "THU":
-                case "FRI":
-                case "SAT":
-                    daysOfWeek.add(day);
-                    break;
-                default:
-                    // Ignore invalid day selection
-            }
-        }
+import com.example.demo.service.DrawImageService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.InputStreamResource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
-        String daysExpression = String.join(",", daysOfWeek);
-        cronExpression = time[1] + " " + time[0] + " * * " + daysExpression;
-    } else if (intervalType.equals("Monthly")) {
-        String[] time = startTime.split(":");
-        String dayOfMonth = detailOptions.get(0).equals("End of Month") ? "L" : "1";
-        cronExpression = time[1] + " " + time[0] + " " + dayOfMonth + " * *";
-    }
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 
-    return cronExpression;
-}
+@Controller
+public class DrawImageController {
 
-import org.quartz.CronExpression;
-import java.text.ParseException;
-import java.util.Date;
+    @Autowired
+    private DrawImageService drawImageService;
 
-public class NextExecutionTime {
-    public static Date getNextExecutionTime(String cronExpressionString) {
-        try {
-            CronExpression cronExpression = new CronExpression(cronExpressionString);
-            return cronExpression.getNextValidTimeAfter(new Date());
-        } catch (ParseException e) {
-            e.printStackTrace();
-            return null;
-        }
-    }
+    @GetMapping("/drawImage")
+    @ResponseBody  // 추가 필요
+    public ResponseEntity<InputStreamResource> drawImage(@RequestParam String filePath) throws IOException {
+        byte[] imageBytes = drawImageService.createImage(filePath);
 
-    public static void main(String[] args) {
-        String cronExpressionString = "0 15 10 ? * MON,TUE,WED,THU,FRI";
-        Date nextExecutionTime = getNextExecutionTime(cronExpressionString);
-        System.out.println("다음 실행 시간: " + nextExecutionTime);
+        // 이미지 응답 설정
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"image.png\"")
+                .contentType(MediaType.IMAGE_PNG)
+                .body(new InputStreamResource(new ByteArrayInputStream(imageBytes)));
     }
 }
 
 
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.autoconfigure.SpringBootApplication;
-import java.nio.channels.*;
+package com.example.demo.service;
+
+import java.io.IOException;
+
+public interface DrawImageService {
+    byte[] createImage(String filePath) throws IOException;
+}
+
+
+package com.example.demo.service.impl;
+
+import com.example.demo.service.DrawImageService;
+import org.springframework.stereotype.Service;
+
+import javax.imageio.ImageIO;
+import java.awt.*;
+import java.awt.image.BufferedImage;
 import java.io.*;
-
-@SpringBootApplication
-public class Application {
-    private static File f;
-    private static FileChannel channel;
-    private static FileLock lock;
-
-    public static void main(String[] args) {
-        try {
-            f = new File("RingOnRequest.lock");
-            if (f.exists()) {
-                f.delete();
-            }
-            channel = new RandomAccessFile(f, "rw").getChannel();
-            lock = channel.tryLock();
-            if(lock == null) {
-                channel.close();
-                throw new RuntimeException("Only 1 instance of MyApp can run.");
-            }
-            ShutdownHook shutdownHook = new ShutdownHook();
-            Runtime.getRuntime().addShutdownHook(shutdownHook);
-
-            SpringApplication.run(Application.class, args);
-            System.out.println("Running");
-
-        } catch(IOException e) {
-            throw new RuntimeException("Could not start process.", e);
-        }
-    }
-
-    public static void unlockFile() {
-        try {
-            if(lock != null) {
-                lock.release();
-                channel.close();
-                f.delete();
-            }
-        } catch(IOException e) {
-            e.printStackTrace();
-        }
-    }
-
-    static class ShutdownHook extends Thread {
-        public void run() {
-            unlockFile();
-        }
-    }
-}
-
-Spring Boot 애플리케이션에서 **lock 파일**을 사용하여 중복 실행을 방지하는 방법을 설명하고, 관련된 코드를 작성해 보겠습니다. Lock 파일은 애플리케이션이 이미 실행 중인지를 감지하는 데 유용하며, 이 방법은 시스템과 상관없이 대부분의 환경에서 동작합니다.
-
-## 1. Spring Boot 애플리케이션 설정
-
-Spring Boot 애플리케이션이 시작될 때, lock 파일을 생성하고, 종료될 때 lock 파일을 삭제하는 로직을 추가해야 합니다. 애플리케이션이 이미 실행 중이라면 적절한 오류 메시지를 출력하고 종료합니다.
-
-### 1.1. Lock 파일 사용 로직 추가
-
-**MainApplication.java:**
-
-```java
-package com.example;
-
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.autoconfigure.SpringBootApplication;
-
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-
-@SpringBootApplication
-public class MainApplication {
-
-    private static final String LOCK_FILE_PATH = "app.lock";
-
-    public static void main(String[] args) {
-        try {
-            // Check for lock file existence
-            if (isAppRunning()) {
-                System.err.println("애플리케이션이 이미 실행 중입니다.");
-                System.exit(1);
-            }
-
-            // Create lock file
-            createLockFile();
-
-            // Add shutdown hook to remove lock file on exit
-            Runtime.getRuntime().addShutdownHook(new Thread(() -> removeLockFile()));
-
-            SpringApplication.run(MainApplication.class, args);
-
-        } catch (IOException e) {
-            System.err.println("애플리케이션을 시작할 수 없습니다: " + e.getMessage());
-            System.exit(1);
-        }
-    }
-
-    private static boolean isAppRunning() {
-        File lockFile = new File(LOCK_FILE_PATH);
-        return lockFile.exists();
-    }
-
-    private static void createLockFile() throws IOException {
-        File lockFile = new File(LOCK_FILE_PATH);
-        if (!lockFile.exists()) {
-            lockFile.createNewFile();
-        }
-    }
-
-    private static void removeLockFile() {
-        try {
-            Files.deleteIfExists(Paths.get(LOCK_FILE_PATH));
-        } catch (IOException e) {
-            System.err.println("Lock 파일을 삭제할 수 없습니다: " + e.getMessage());
-        }
-    }
-}
-```
-
-### 설명
-
-- **`LOCK_FILE_PATH`**: Lock 파일의 경로를 지정합니다. 프로젝트 디렉토리에 `app.lock` 파일을 생성합니다.
-- **`isAppRunning()`**: Lock 파일이 존재하는지 확인하여 애플리케이션의 중복 실행을 감지합니다.
-- **`createLockFile()`**: 애플리케이션이 실행될 때 lock 파일을 생성합니다.
-- **`removeLockFile()`**: 애플리케이션이 종료될 때 lock 파일을 삭제합니다.
-- **`addShutdownHook`**: 애플리케이션이 정상적으로 종료되거나 시스템 종료 시 lock 파일을 제거합니다.
-
-## 2. 배치 파일 수정
-
-이제 lock 파일을 사용하는 Spring Boot 애플리케이션을 실행하기 위한 배치 파일을 수정합니다.
-
-### 2.1. 배치 파일 작성
-
-**run-app.bat:**
-
-```bat
-@echo off
-setlocal
-
-REM Define variables
-set JAVA_HOME=C:\path\to\your\jdk
-set JAR_FILE=build\libs\your-app-name.jar
-
-REM Set additional JVM options if necessary
-set JVM_OPTS=-Xms512m -Xmx1024m
-
-REM Run the Spring Boot application
-echo 애플리케이션을 시작합니다...
-"%JAVA_HOME%\bin\java" %JVM_OPTS% -jar %JAR_FILE%
-
-REM Check exit code and display appropriate message
-if %ERRORLEVEL% equ 1 (
-    echo 애플리케이션이 이미 실행 중입니다.
-)
-
-REM Pause the console window to see logs
-pause
-
-endlocal
-```
-
-### 배치 파일 설명
-
-- **애플리케이션 실행**: 애플리케이션을 실행하고 종료 코드를 확인합니다.
-- **오류 메시지 표시**: 종료 코드가 `1`인 경우 "애플리케이션이 이미 실행 중입니다."라는 메시지를 출력합니다.
-- **콘솔 창 유지**: `pause` 명령어를 사용하여 로그를 확인할 수 있도록 콘솔 창을 유지합니다.
-
-=================================================
-
-배치 파일을 작성하여 Spring Boot 애플리케이션이 이미 실행 중인지를 체크하고, 실행 중이라면 "이미 실행 중입니다"라는 메시지를 출력한 후 종료하는 방법을 설명하겠습니다. 이 방법은 `tasklist` 명령어를 사용하여 현재 실행 중인 Java 프로세스를 확인한 다음, 해당 프로세스가 이미 실행 중인지를 판단합니다.
-
-### 1. 애플리케이션 프로세스 확인
-
-애플리케이션의 JAR 파일을 실행할 때, Java 프로세스가 이미 실행 중인지를 확인하여야 합니다. 이를 위해 `tasklist` 명령어를 사용하여 실행 중인 프로세스를 검색합니다.
-
-### 2. 배치 파일 작성
-
-다음은 실행 중인 애플리케이션을 감지하고, 이미 실행 중이면 종료하는 배치 파일의 예제입니다.
-
-**run-app.bat:**
-
-```bat
-@echo off
-setlocal
-
-REM Define variables
-set JAVA_HOME=C:\path\to\your\jdk
-set JAR_FILE=build\libs\your-app-name.jar
-set APP_NAME=your-app-name.jar
-
-REM Check if the application is already running
-tasklist /FI "IMAGENAME eq java.exe" /FO LIST | findstr /I /C:"%APP_NAME%" > nul
-if %ERRORLEVEL% equ 0 (
-    echo 애플리케이션이 이미 실행 중입니다.
-    exit /B 1
-)
-
-REM Set additional JVM options if necessary
-set JVM_OPTS=-Xms512m -Xmx1024m
-
-REM Run the Spring Boot application
-echo 애플리케이션을 시작합니다...
-"%JAVA_HOME%\bin\java" %JVM_OPTS% -jar %JAR_FILE%
-
-REM Pause the console window to see logs
-pause
-
-endlocal
-```
-
-### 배치 파일 설명
-
-1. **변수 설정**:
-    - `JAVA_HOME`은 JDK 경로를 지정합니다.
-    - `JAR_FILE`은 실행할 JAR 파일의 경로를 지정합니다.
-    - `APP_NAME`은 JAR 파일의 이름입니다. 이 이름을 기반으로 실행 중인 프로세스를 찾습니다.
-
-2. **애플리케이션 실행 여부 확인**:
-    - `tasklist` 명령어를 사용하여 현재 실행 중인 Java 프로세스 목록을 가져옵니다.
-    - `findstr` 명령어를 사용하여 프로세스 목록에서 `APP_NAME`을 검색합니다.
-    - 이미 실행 중이라면 `ERRORLEVEL`이 0이 되고, "애플리케이션이 이미 실행 중입니다."라는 메시지를 출력한 후, `exit /B 1`로 배치 파일을 종료합니다.
-
-3. **애플리케이션 실행**:
-    - 애플리케이션이 실행 중이 아니라면 Java 명령어로 JAR 파일을 실행합니다.
-
-4. **콘솔 창 유지**:
-    - 애플리케이션 종료 시 콘솔 창이 닫히지 않도록 `pause` 명령어를 사용합니다.
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-
-public class DirectoryCreator {
-
-    public static void main(String[] args) {
-        String directoryName = "example";
-        Path createdDirectory = createUniqueDirectory(directoryName);
-        System.out.println("Created Directory: " + createdDirectory.toString());
-    }
-
-    public static Path createUniqueDirectory(String directoryName) {
-        return createUniqueDirectory(Paths.get(directoryName), 0);
-    }
-
-    private static Path createUniqueDirectory(Path directoryPath, int copyIndex) {
-        Path newPath = copyIndex == 0 ? directoryPath : Paths.get(directoryPath.toString() + "_copy" + copyIndex);
-        
-        try {
-            if (!Files.exists(newPath)) {
-                return Files.createDirectory(newPath);
-            } else {
-                // Recurse with incremented copy index if directory already exists
-                return createUniqueDirectory(directoryPath, copyIndex + 1);
-            }
-        } catch (IOException e) {
-            System.err.println("An error occurred while creating the directory: " + e.getMessage());
-            return null;
-        }
-    }
-}
-
-
-<dependency>
-    <groupId>commons-net</groupId>
-    <artifactId>commons-net</artifactId>
-    <version>3.8.0</version>
-</dependency>
-```
-
-### FTP 세션 관리 클래스
-
-아래 코드는 FTP 연결 세션을 이름으로 관리하는 Java 클래스입니다.
-
-```java
-import org.apache.commons.net.ftp.FTP;
-import org.apache.commons.net.ftp.FTPClient;
-import java.io.IOException;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.util.HashMap;
-import java.util.Map;
-
-public class FtpSessionManager {
-    private Map<String, FTPClient> sessions = new HashMap<>();
-
-    /**
-     * 세션을 생성하고 FTP 서버에 연결합니다.
-     * @param sessionName 세션의 이름
-     * @param server 서버 주소
-     * @param port 포트 번호
-     * @param user 사용자 이름
-     * @param pass 비밀번호
-     * @throws IOException 연결 실패 시 예외 발생
-     */
-    public void createSession(String sessionName, String server, int port, String user, String pass) throws IOException {
-        FTPClient ftpClient = new FTPClient();
-        ftpClient.connect(server, port);
-
-        if (ftpClient.login(user, pass)) {
-            ftpClient.enterLocalPassiveMode();
-            ftpClient.setFileType(FTP.BINARY_FILE_TYPE);
-            sessions.put(sessionName, ftpClient);
-            System.out.println("Session " + sessionName + " created and connected to server.");
-        } else {
-            throw new IOException("Failed to login to FTP server");
-        }
-    }
-
-    /**
-     * 지정된 이름의 세션을 닫고 연결을 종료합니다.
-     * @param sessionName 세션의 이름
-     * @throws IOException 세션이 없거나 종료 실패 시 예외 발생
-     */
-    public void closeSession(String sessionName) throws IOException {
-        FTPClient ftpClient = sessions.get(sessionName);
-        if (ftpClient != null && ftpClient.isConnected()) {
-            ftpClient.logout();
-            ftpClient.disconnect();
-            sessions.remove(sessionName);
-            System.out.println("Session " + sessionName + " closed.");
-        } else {
-            throw new IOException("Session " + sessionName + " not found or already closed.");
-        }
-    }
-
-    /**
-     * 파일을 업로드합니다.
-     * @param sessionName 세션의 이름
-     * @param localFilePath 로컬 파일 경로
-     * @param remoteFilePath 원격 파일 경로
-     * @throws IOException 파일 전송 실패 시 예외 발생
-     */
-    public void uploadFile(String sessionName, String localFilePath, String remoteFilePath) throws IOException {
-        FTPClient ftpClient = sessions.get(sessionName);
-        if (ftpClient != null) {
-            try (FileInputStream fis = new FileInputStream(localFilePath)) {
-                boolean success = ftpClient.storeFile(remoteFilePath, fis);
-                if (success) {
-                    System.out.println("File uploaded successfully to " + remoteFilePath);
-                } else {
-                    throw new IOException("Failed to upload file to " + remoteFilePath);
+import java.util.List;
+import java.util.stream.Collectors;
+
+@Service
+public class DrawImageServiceImpl implements DrawImageService {
+    private static final int IMAGE_SIZE = 32;
+
+    @Override
+    public byte[] createImage(String filePath) throws IOException {
+        BufferedImage image = new BufferedImage(IMAGE_SIZE, IMAGE_SIZE, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g2d = image.createGraphics();
+
+        // 배경을 검정색으로 설정
+        g2d.setColor(Color.BLACK);
+        g2d.fillRect(0, 0, IMAGE_SIZE, IMAGE_SIZE);
+
+        // 좌표 파일을 읽고 도형 그리기
+        try (BufferedReader br = new BufferedReader(new FileReader(new File(filePath)))) {
+            List<String[]> elements = br.lines()
+                    .map(line -> line.split(","))
+                    .collect(Collectors.toList());
+
+            for (String[] element : elements) {
+                String shapeType = element[0].trim().toLowerCase();  // 도형 유형 (circle, rect, line, ellipse)
+                switch (shapeType) {
+                    case "circle":
+                        drawCircle(g2d, element);
+                        break;
+                    case "rect":
+                        drawRect(g2d, element);
+                        break;
+                    case "line":
+                        drawLine(g2d, element);
+                        break;
+                    case "ellipse":
+                        drawEllipse(g2d, element);  // 타원형 처리
+                        break;
+                    default:
+                        System.out.println("Unknown shape: " + shapeType);
                 }
             }
-        } else {
-            throw new IOException("Session " + sessionName + " not found.");
         }
+
+        g2d.dispose();
+
+        // 이미지 바이트 배열로 변환
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        ImageIO.write(image, "png", baos);
+        return baos.toByteArray();
     }
 
-    /**
-     * 파일을 다운로드합니다.
-     * @param sessionName 세션의 이름
-     * @param remoteFilePath 원격 파일 경로
-     * @param localFilePath 로컬 파일 경로
-     * @throws IOException 파일 다운로드 실패 시 예외 발생
-     */
-    public void downloadFile(String sessionName, String remoteFilePath, String localFilePath) throws IOException {
-        FTPClient ftpClient = sessions.get(sessionName);
-        if (ftpClient != null) {
-            try (FileOutputStream fos = new FileOutputStream(localFilePath)) {
-                boolean success = ftpClient.retrieveFile(remoteFilePath, fos);
-                if (success) {
-                    System.out.println("File downloaded successfully to " + localFilePath);
-                } else {
-                    throw new IOException("Failed to download file from " + remoteFilePath);
-                }
-            }
-        } else {
-            throw new IOException("Session " + sessionName + " not found.");
-        }
+    // 원 그리기
+    private void drawCircle(Graphics2D g2d, String[] element) {
+        int x = Integer.parseInt(element[1].trim());
+        int y = Integer.parseInt(element[2].trim());
+        int radius = Integer.parseInt(element[3].trim());
+        Color color = getColor(element[4].trim());
+
+        g2d.setColor(color);
+        g2d.drawOval(x - radius, y - radius, 2 * radius, 2 * radius);
     }
 
-    public static void main(String[] args) {
-        FtpSessionManager manager = new FtpSessionManager();
-        
-        try {
-            // 세션 생성
-            manager.createSession("mySession", "ftp.example.com", 21, "user", "pass");
-            
-            // 파일 업로드
-            manager.uploadFile("mySession", "C:/local/path/to/file.txt", "/remote/path/file.txt");
-            
-            // 파일 다운로드
-            manager.downloadFile("mySession", "/remote/path/file.txt", "C:/local/path/to/downloaded_file.txt");
-            
-            // 세션 종료
-            manager.closeSession("mySession");
-        } catch (IOException e) {
-            e.printStackTrace();
+    // 사각형 그리기
+    private void drawRect(Graphics2D g2d, String[] element) {
+        int x = Integer.parseInt(element[1].trim());
+        int y = Integer.parseInt(element[2].trim());
+        int width = Integer.parseInt(element[3].trim());
+        int height = Integer.parseInt(element[4].trim());
+        Color color = getColor(element[5].trim());
+
+        g2d.setColor(color);
+        g2d.drawRect(x, y, width, height);
+    }
+
+    // 선 그리기
+    private void drawLine(Graphics2D g2d, String[] element) {
+        int x1 = Integer.parseInt(element[1].trim());
+        int y1 = Integer.parseInt(element[2].trim());
+        int x2 = Integer.parseInt(element[3].trim());
+        int y2 = Integer.parseInt(element[4].trim());
+        Color color = getColor(element[5].trim());
+
+        g2d.setColor(color);
+        g2d.drawLine(x1, y1, x2, y2);
+    }
+
+    // 타원형 그리기
+    private void drawEllipse(Graphics2D g2d, String[] element) {
+        int x = Integer.parseInt(element[1].trim());
+        int y = Integer.parseInt(element[2].trim());
+        int radiusX = Integer.parseInt(element[3].trim());
+        int radiusY = Integer.parseInt(element[4].trim());
+        Color color = getColor(element[5].trim());
+
+        g2d.setColor(color);
+        g2d.drawOval(x - radiusX, y - radiusY, 2 * radiusX, 2 * radiusY);
+    }
+
+    // 색상 파싱
+    private Color getColor(String colorName) {
+        switch (colorName.toLowerCase()) {
+            case "red":
+                return Color.RED;
+            case "blue":
+                return Color.BLUE;
+            case "green":
+                return Color.GREEN;
+            case "yellow":
+                return Color.YELLOW;
+            default:
+                return Color.WHITE;  // 기본 색상
         }
     }
 }
 
-
-
-
-import org.apache.commons.net.ftp.FTPClient;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
-
-import java.io.IOException;
-import java.util.HashMap;
-import java.util.Map;
-
-@Component
-public class FtpSessionManager {
-
-    @Value("${ftp.server}")
-    private String server;
-
-    @Value("${ftp.port}")
-    private int port;
-
-    @Value("${ftp.user}")
-    private String user;
-
-    @Value("${ftp.password}")
-    private String password;
-
-    private Map<String, FTPClient> sessionMap = new HashMap<>();
-
-    public FTPClient createSession(String sessionName) throws IOException {
-        FTPClient ftpClient = new FTPClient();
-        ftpClient.connect(server, port);
-        ftpClient.login(user, password);
-        ftpClient.enterLocalPassiveMode();
-        sessionMap.put(sessionName, ftpClient);
-        return ftpClient;
-    }
-
-    public FTPClient getSession(String sessionName) {
-        return sessionMap.get(sessionName);
-    }
-
-    public void closeSession(String sessionName) throws IOException {
-        FTPClient ftpClient = sessionMap.get(sessionName);
-        if (ftpClient != null && ftpClient.isConnected()) {
-            ftpClient.logout();
-            ftpClient.disconnect();
-            sessionMap.remove(sessionName);
-        }
-    }
-
-    public void closeAllSessions() throws IOException {
-        for (FTPClient ftpClient : sessionMap.values()) {
-            if (ftpClient.isConnected()) {
-                ftpClient.logout();
-                ftpClient.disconnect();
-            }
-        }
-        sessionMap.clear();
-    }
-}
 
 */
