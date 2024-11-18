@@ -186,4 +186,33 @@ public class ParallelProcessExecutor {
     }
 }
 
+private static final Object lock = new Object();
+
+private static void executeProcess(String command) {
+    synchronized (lock) {
+        if (runningProcesses.containsKey(command)) {
+            System.out.println("Command is already running: " + command);
+            return;
+        }
+        runningProcesses.put(command, null); // 실행 중 상태로 설정
+    }
+
+    try {
+        Process process = new ProcessBuilder(command.split(" ")).start();
+        runningProcesses.put(command, process); // 실제 프로세스 객체 저장
+        System.out.println("Started process: " + command);
+
+        process.waitFor();
+        System.out.println("Finished process: " + command);
+
+    } catch (Exception e) {
+        System.err.println("Error executing command: " + command);
+        e.printStackTrace();
+    } finally {
+        synchronized (lock) {
+            runningProcesses.remove(command);
+        }
+    }
+}
+
 */
