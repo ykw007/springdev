@@ -119,207 +119,71 @@ Spring Boot 애플리케이션에서 HikariCP를 이용하여 초경량으로 DB
 
 이와 같이 HikariCP와 관련된 최소 설정을 통해 빠르고 경량화된 Spring Boot 애플리케이션을 구성할 수 있습니다.
 
+import java.util.List;
+import java.util.concurrent.*;
 
+public class ParallelProcessExecutor {
 
-`CommandLineRunner`를 사용하지 않고, DB 연결만을 확인하며 초경량으로 Spring Boot 애플리케이션을 기동하려면 다음과 같은 방법을 사용할 수 있습니다. 주로 애플리케이션이 서버로 동작할 때 유용한 방법입니다.
+    // 실행 중인 프로세스를 추적하는 ConcurrentHashMap
+    private static final ConcurrentHashMap<String, Process> runningProcesses = new ConcurrentHashMap<>();
 
-### 1. **RestController로 간단한 Health Check API 구성**
-   - DB 연결 확인을 위한 간단한 REST API를 구성하여 HTTP 요청을 통해 DB 상태를 확인할 수 있습니다. 이 방법은 `CommandLineRunner` 없이도 연결 상태를 검증할 수 있는 장점이 있습니다.
-   ```java
-   import org.springframework.beans.factory.annotation.Autowired;
-   import org.springframework.web.bind.annotation.GetMapping;
-   import org.springframework.web.bind.annotation.RestController;
+    public static void main(String[] args) throws InterruptedException {
+        // 명령어 목록
+        List<String> commands = List.of(
+            "ping -c 2 google.com",
+            "ping -c 2 yahoo.com",
+            "ping -c 2 bing.com",
+            "ping -c 2 duckduckgo.com",
+            "ping -c 2 github.com",
+            "ping -c 2 stackoverflow.com",
+            "ping -c 2 openai.com",
+            "ping -c 2 amazon.com",
+            "ping -c 2 netflix.com",
+            "ping -c 2 reddit.com"
+        );
 
-   import javax.sql.DataSource;
-   import java.sql.Connection;
-   import java.sql.SQLException;
+        // 스레드 풀 생성 (최대 10개의 병렬 작업)
+        ExecutorService executorService = Executors.newFixedThreadPool(10);
 
-   @RestController
-   public class HealthCheckController {
-       @Autowired
-       private DataSource dataSource;
-
-       @GetMapping("/health")
-       public String healthCheck() {
-           try (Connection conn = dataSource.getConnection()) {
-               return conn.isValid(2) ? "DB Connection Successful" : "DB Connection Failed";
-           } catch (SQLException e) {
-               return "DB Connection Error: " + e.getMessage();
-           }
-       }
-   }
-   ```
-
-### 2. **ApplicationListener 사용**
-   - `ApplicationListener`를 사용해 애플리케이션 시작 시점에서 DB 연결만 확인할 수 있습니다. 이 방법은 특정 이벤트(`ApplicationReadyEvent` 등)를 기반으로 동작하므로, `CommandLineRunner` 대신 특정 작업을 처리하는 데 유용합니다.
-   ```java
-   import org.springframework.boot.context.event.ApplicationReadyEvent;
-   import org.springframework.context.ApplicationListener;
-   import org.springframework.stereotype.Component;
-
-   import javax.sql.DataSource;
-   import java.sql.Connection;
-   import java.sql.SQLException;
-
-   @Component
-   public class DatabaseConnectionChecker implements ApplicationListener<ApplicationReadyEvent> {
-       private final DataSource dataSource;
-
-       public DatabaseConnectionChecker(DataSource dataSource) {
-           this.dataSource = dataSource;
-       }
-
-       @Override
-       public void onApplicationEvent(ApplicationReadyEvent event) {
-           try (Connection conn = dataSource.getConnection()) {
-               System.out.println("DB Connection Successful: " + conn.isValid(2));
-           } catch (SQLException e) {
-               System.err.println("DB Connection Error: " + e.getMessage());
-           }
-       }
-   }
-   ```
-
-### 3. **Health Indicator 활용**
-   - Spring Boot의 `HealthIndicator`를 사용해 DB 연결 상태를 모니터링할 수 있습니다. Spring Boot Actuator를 사용 중이라면 `HealthIndicator`가 `/actuator/health` 엔드포인트로 노출되어 기본적인 연결 상태를 제공합니다.
-   ```java
-   import org.springframework.boot.actuate.health.Health;
-   import org.springframework.boot.actuate.health.HealthIndicator;
-   import org.springframework.stereotype.Component;
-
-   import javax.sql.DataSource;
-   import java.sql.Connection;
-   import java.sql.SQLException;
-
-   @Component
-   public class DbHealthIndicator implements HealthIndicator {
-       private final DataSource dataSource;
-
-       public DbHealthIndicator(DataSource dataSource) {
-           this.dataSource = dataSource;
-       }
-
-       @Override
-       public Health health() {
-           try (Connection conn = dataSource.getConnection()) {
-               if (conn.isValid(2)) {
-                   return Health.up().withDetail("DB Connection", "Successful").build();
-               }
-           } catch (SQLException e) {
-               return Health.down().withDetail("DB Connection Error", e.getMessage()).build();
-           }
-           return Health.down().build();
-       }
-   }
-   ```
-
-### 4. **Lazy Initialization 및 자동 설정 제외 최적화**
-   - DB 연결을 확인하는 데 필요한 최소 설정만 유지하고, 필요한 경우 REST API나 Health Check 방식으로 연결 상태를 확인할 수 있습니다.
-   - `application.properties`:
-     ```properties
-     spring.main.lazy-initialization=true
-     spring.datasource.hikari.maximum-pool-size=5
-     ```
-
-이와 같은 설정으로 `CommandLineRunner` 없이도 DB 연결 상태를 효율적으로 확인할 수 있으며, Spring Boot 애플리케이션을 초경량으로 구동할 수 있습니다.
-
-네, `CommandLineRunner` 없이도 초경량으로 Spring Boot 애플리케이션을 기동할 수 있습니다. 이를 위해 불필요한 기능을 제외하고 DB 연결만 유지하는 설정을 적용할 수 있습니다. 아래와 같이 설정하면 기동 속도를 최적화할 수 있습니다.
-
-### 1. **불필요한 자동 구성 제외하기**
-   - Spring Boot의 자동 구성을 최소화하고, DB 연결만을 위한 필수 구성 요소만 남깁니다.
-   - 예를 들어, Web, JPA, Security 등의 자동 구성을 제외합니다.
-   ```java
-   @SpringBootApplication(exclude = {
-       WebMvcAutoConfiguration.class,
-       SecurityAutoConfiguration.class,
-       HibernateJpaAutoConfiguration.class
-   })
-   ```
-
-### 2. **Lazy Initialization 활성화**
-   - `spring.main.lazy-initialization=true` 설정을 통해 필요한 빈만 로딩하여 기동 시 불필요한 빈 생성을 줄입니다.
-   ```properties
-   spring.main.lazy-initialization=true
-   ```
-
-### 3. **HikariCP 최소 설정**
-   - DB 연결 시 HikariCP 설정을 최적화하여, 적은 리소스로 빠르게 커넥션 풀을 관리할 수 있도록 합니다.
-   ```yaml
-   spring:
-     datasource:
-       url: jdbc:mysql://localhost:3306/yourdb
-       username: yourusername
-       password: yourpassword
-       driver-class-name: com.mysql.cj.jdbc.Driver
-       hikari:
-         maximum-pool-size: 5              # 커넥션 풀 크기 최소화
-         minimum-idle: 1                   # 최소 유휴 커넥션 수 최소화
-         connection-timeout: 2000          # 커넥션 획득 대기 시간(ms)
-         pool-name: "HikariPool"           # 풀 이름 설정
-   ```
-
-### 4. **Actuator 비활성화**
-   - 애플리케이션에서 Actuator와 같은 모니터링 기능이 필요하지 않다면 비활성화하여 불필요한 빈 생성을 줄입니다.
-   ```properties
-   management.endpoints.enabled-by-default=false
-   ```
-
-### 5. **JPA 및 Hibernate 비활성화**
-   - 단순 JDBC 기반으로만 DB에 접근한다면 JPA 및 Hibernate 설정을 비활성화합니다.
-   ```properties
-   spring.jpa.hibernate.ddl-auto=none
-   spring.jpa.show-sql=false
-   ```
-
-### 6. **JVM 설정 최적화**
-   - 가벼운 기동을 위해 JVM 메모리 설정을 조정하고, `Serial GC`와 같이 간단한 가비지 컬렉터를 설정합니다.
-   - 예: `-Xms128m -Xmx128m -XX:+UseSerialGC`
-
-이와 같이 설정하면 `CommandLineRunner` 없이도 DB 연결만을 위한 초경량 Spring Boot 애플리케이션을 구성할 수 있습니다.
-
-
-네, `zeroground` 패키지를 사용하면 프로세스의 실행과 종료 시점을 보다 간단하게 제어할 수 있습니다. 이 패키지는 Java에서 다양한 시스템 작업을 관리할 수 있는 기능을 제공합니다. `zeroground` 패키지의 `ProcessWatcher` 클래스를 활용하면, 프로세스가 종료되는 시점을 손쉽게 감지할 수 있습니다.
-
-아래는 `zeroground` 패키지의 `ProcessWatcher` 클래스를 사용하여 프로세스 종료 시점을 확인하는 예제입니다:
-
-```java
-import zeroground.process.ProcessWatcher;
-import java.time.LocalDateTime;
-
-public class ProcessExample {
-    public static void main(String[] args) {
         try {
-            // ProcessWatcher를 통해 커맨드 실행 및 종료 감지
-            ProcessWatcher watcher = new ProcessWatcher("bash", "-c", "echo Hello, World! && sleep 3");
+            // 명령어를 병렬로 실행
+            for (String command : commands) {
+                executorService.submit(() -> executeProcess(command));
+            }
+        } finally {
+            // 스레드 풀 종료
+            executorService.shutdown();
+            executorService.awaitTermination(10, TimeUnit.MINUTES);
+        }
 
-            // 프로세스 시작
-            watcher.start();
-            System.out.println("Process started...");
+        System.out.println("All processes have been executed.");
+    }
 
-            // 종료 시점을 확인
-            watcher.onExit((exitCode) -> {
-                LocalDateTime endTime = LocalDateTime.now();
-                System.out.println("Process exited at: " + endTime);
-                System.out.println("Process exited with code: " + exitCode);
+    // 프로세스를 실행하는 메서드
+    private static void executeProcess(String command) {
+        if (runningProcesses.containsKey(command)) {
+            System.out.println("Command is already running: " + command);
+            return;
+        }
 
-                if (exitCode == 0) {
-                    System.out.println("Process completed successfully.");
-                } else {
-                    System.out.println("Process terminated with an error.");
-                }
-            });
+        try {
+            // 프로세스를 시작
+            Process process = new ProcessBuilder(command.split(" ")).start();
+            runningProcesses.put(command, process);
+            System.out.println("Started process: " + command);
+
+            // 비동기적으로 종료 감지
+            process.waitFor();
+            System.out.println("Finished process: " + command);
 
         } catch (Exception e) {
+            System.err.println("Error executing command: " + command);
             e.printStackTrace();
+        } finally {
+            // 프로세스 종료 시 목록에서 제거
+            runningProcesses.remove(command);
         }
     }
 }
-```
 
-### 코드 설명
-1. **`ProcessWatcher`**: `ProcessWatcher` 객체는 지정된 명령을 실행하고, 프로세스 종료 시점에 대한 콜백을 제공합니다.
-2. **프로세스 시작**: `watcher.start()`를 통해 프로세스를 시작합니다.
-3. **종료 감지**: `watcher.onExit` 메서드에 종료 시 호출될 람다식 콜백을 등록하여 프로세스 종료 시점과 종료 코드를 확인합니다.
-
-이 코드에서는 `zeroground` 패키지를 통해 종료 시점을 보다 직관적으로 관리할 수 있으며, 콜백을 사용해 종료 후 필요한 처리를 할 수 있습니다.
 */
