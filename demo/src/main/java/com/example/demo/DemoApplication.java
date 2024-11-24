@@ -119,98 +119,133 @@ Spring Boot 애플리케이션에서 HikariCP를 이용하여 초경량으로 DB
 
 이와 같이 HikariCP와 관련된 최소 설정을 통해 빠르고 경량화된 Spring Boot 애플리케이션을 구성할 수 있습니다.
 
-import java.util.List;
-import java.util.concurrent.*;
+import org.springframework.stereotype.Component;
 
-public class ParallelProcessExecutor {
+@Component
+public class JobBizA extends JobBaseBiz {
 
-    // 실행 중인 프로세스를 추적하는 ConcurrentHashMap
-    private static final ConcurrentHashMap<String, Process> runningProcesses = new ConcurrentHashMap<>();
+    @Override
+    protected void executeJobRequest(String requestId) throws Exception {
+        System.out.println("[JobBizA] Processing job request ID: " + requestId);
 
-    public static void main(String[] args) throws InterruptedException {
-        // 명령어 목록
-        List<String> commands = List.of(
-            "ping -c 2 google.com",
-            "ping -c 2 yahoo.com",
-            "ping -c 2 bing.com",
-            "ping -c 2 duckduckgo.com",
-            "ping -c 2 github.com",
-            "ping -c 2 stackoverflow.com",
-            "ping -c 2 openai.com",
-            "ping -c 2 amazon.com",
-            "ping -c 2 netflix.com",
-            "ping -c 2 reddit.com"
-        );
+        // 실제 업무 처리 로직 작성
+        // Example: businessLogic.process(requestId);
 
-        // 스레드 풀 생성 (최대 10개의 병렬 작업)
-        ExecutorService executorService = Executors.newFixedThreadPool(10);
-
-        try {
-            // 명령어를 병렬로 실행
-            for (String command : commands) {
-                executorService.submit(() -> executeProcess(command));
-            }
-        } finally {
-            // 스레드 풀 종료
-            executorService.shutdown();
-            executorService.awaitTermination(10, TimeUnit.MINUTES);
-        }
-
-        System.out.println("All processes have been executed.");
-    }
-
-    // 프로세스를 실행하는 메서드
-    private static void executeProcess(String command) {
-        if (runningProcesses.containsKey(command)) {
-            System.out.println("Command is already running: " + command);
-            return;
-        }
-
-        try {
-            // 프로세스를 시작
-            Process process = new ProcessBuilder(command.split(" ")).start();
-            runningProcesses.put(command, process);
-            System.out.println("Started process: " + command);
-
-            // 비동기적으로 종료 감지
-            process.waitFor();
-            System.out.println("Finished process: " + command);
-
-        } catch (Exception e) {
-            System.err.println("Error executing command: " + command);
-            e.printStackTrace();
-        } finally {
-            // 프로세스 종료 시 목록에서 제거
-            runningProcesses.remove(command);
+        if (requestId.equals("Request-001")) {
+            System.out.println("[JobBizA] Job request processed successfully.");
+        } else {
+            throw new RuntimeException("Unknown job request ID: " + requestId);
         }
     }
 }
 
-private static final Object lock = new Object();
+public abstract class JobBaseBiz extends JobBase {
 
-private static void executeProcess(String command) {
-    synchronized (lock) {
-        if (runningProcesses.containsKey(command)) {
-            System.out.println("Command is already running: " + command);
-            return;
+    // 작업요청정보 상태 업데이트
+    protected void updateJobRequestStatus(String requestId, int status) {
+        DefaultTransactionDefinition def = new DefaultTransactionDefinition();
+        def.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+
+        TransactionStatus transactionStatus = getTransactionManager().getTransaction(def);
+        try {
+            System.out.println("[LOG] Updating job request ID: " + requestId + ", Status: " + status);
+            // UPDATE 작업요청정보 테이블
+            // jobRequestRepository.updateStatus(requestId, status);
+
+            getTransactionManager().commit(transactionStatus);
+        } catch (Exception e) {
+            getTransactionManager().rollback(transactionStatus);
+            System.out.println("[ERROR] Failed to update job request status: " + e.getMessage());
         }
-        runningProcesses.put(command, null); // 실행 중 상태로 설정
     }
 
-    try {
-        Process process = new ProcessBuilder(command.split(" ")).start();
-        runningProcesses.put(command, process); // 실제 프로세스 객체 저장
-        System.out.println("Started process: " + command);
+    // 추상 메서드: 비즈니스 로직 정의
+    protected abstract void executeJobRequest(String requestId) throws Exception;
 
-        process.waitFor();
-        System.out.println("Finished process: " + command);
+    @Override
+    protected final void executeJobLogic(String logId) throws Exception {
+        System.out.println("[JobBaseBiz] Starting job logic...");
+        // 작업요청정보 ID 예제 (실제 로직에서 ID를 받아옴)
+        String requestId = "Request-001";
 
-    } catch (Exception e) {
-        System.err.println("Error executing command: " + command);
-        e.printStackTrace();
-    } finally {
-        synchronized (lock) {
-            runningProcesses.remove(command);
+        updateJobRequestStatus(requestId, 1); // 실행 중으로 업데이트
+        try {
+            executeJobRequest(requestId); // 비즈니스 로직 실행
+            updateJobRequestStatus(requestId, 2); // 정상 종료로 업데이트
+        } catch (Exception e) {
+            updateJobRequestStatus(requestId, 3); // 에러 상태로 업데이트
+            throw e;
+        }
+    }
+}
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.DefaultTransactionDefinition;
+
+public abstract class JobBase {
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
+    // 추상 메서드: 각 작업 클래스에서 비즈니스 로직 구현
+    protected abstract void executeJobLogic(String logId) throws Exception;
+
+    // 공통: 스케줄러 실행 이력을 삽입하고 ID 반환
+    protected String insertSchedulerLog(String jobName, int status, String message) {
+        DefaultTransactionDefinition def = new DefaultTransactionDefinition();
+        def.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+
+        TransactionStatus transactionStatus = transactionManager.getTransaction(def);
+        String logId = null;
+
+        try {
+            System.out.println("[LOG] Inserting scheduler log for job: " + jobName);
+            // INSERT 스케줄러 실행 이력
+            // logId = schedulerLogRepository.insert(jobName, status, message);
+
+            // 예제: 임의의 이력 ID 생성
+            logId = "Log-" + System.currentTimeMillis();
+
+            transactionManager.commit(transactionStatus);
+        } catch (Exception e) {
+            transactionManager.rollback(transactionStatus);
+            System.out.println("[ERROR] Failed to insert scheduler log: " + e.getMessage());
+            throw e;
+        }
+
+        return logId;
+    }
+
+    // 공통: 실행 이력 상태 업데이트
+    protected void updateSchedulerStatus(String logId, int status, String message) {
+        DefaultTransactionDefinition def = new DefaultTransactionDefinition();
+        def.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+
+        TransactionStatus transactionStatus = transactionManager.getTransaction(def);
+        try {
+            System.out.println("[LOG] Updating scheduler log ID: " + logId + ", Status: " + status + ", Message: " + message);
+            // UPDATE 스케줄러 실행 이력
+            // schedulerLogRepository.updateStatus(logId, status, message);
+
+            transactionManager.commit(transactionStatus);
+        } catch (Exception e) {
+            transactionManager.rollback(transactionStatus);
+            System.out.println("[ERROR] Failed to update scheduler log status: " + e.getMessage());
+        }
+    }
+
+    // 템플릿 메서드: 작업 실행 흐름 정의
+    public final void executeJob(String jobName) {
+        String logId = insertSchedulerLog(jobName, 0, jobName + " started"); // 대기 상태로 INSERT
+        try {
+            executeJobLogic(logId); // 비즈니스 로직 실행
+            updateSchedulerStatus(logId, 2, jobName + " completed"); // 정상 종료 상태로 업데이트
+        } catch (Exception e) {
+            updateSchedulerStatus(logId, 3, jobName + " error: " + e.getMessage()); // 에러 상태로 업데이트
+            throw e;
         }
     }
 }
