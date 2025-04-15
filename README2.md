@@ -210,3 +210,22 @@ public class QuartzService {
         scheduler.rescheduleJob(triggerKey, newTrigger);
     }
 }
+
+
+
+/**
+ * 분 단위 간격(interval)을 Quartz cron 표현식으로 변환하는 유틸 함수
+ * 
+ * @param intervalInMinutes 분 단위 간격 (예: 5, 10, 30 등)
+ * @return Quartz Cron Expression 문자열 (예: "0 0/10 * * * ?")
+ * @throws IllegalArgumentException 잘못된 입력 값 처리
+ */
+public static String toCronExpression(int intervalInMinutes) {
+    if (intervalInMinutes <= 0 || intervalInMinutes > 60) {
+        throw new IllegalArgumentException("interval은 1 ~ 60 사이의 값이어야 합니다.");
+    }
+
+    // 형식: 초 분 시 일 월 요일 (Quartz 기준)
+    // 분단위 반복: "0 0/10 * * * ?"
+    return String.format("0 0/%d * * * ?", intervalInMinutes);
+}
