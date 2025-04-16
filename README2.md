@@ -211,57 +211,110 @@ public class QuartzService {
     }
 }
 
-
-
-/**
- * 분 단위 간격(interval)을 Quartz cron 표현식으로 변환하는 유틸 함수
- * 
- * @param intervalInMinutes 분 단위 간격 (예: 5, 10, 30 등)
- * @return Quartz Cron Expression 문자열 (예: "0 0/10 * * * ?")
- * @throws IllegalArgumentException 잘못된 입력 값 처리
- */
-public static String toCronExpression(int intervalInMinutes) {
-    if (intervalInMinutes <= 0 || intervalInMinutes > 60) {
-        throw new IllegalArgumentException("interval은 1 ~ 60 사이의 값이어야 합니다.");
-    }
-
-    // 형식: 초 분 시 일 월 요일 (Quartz 기준)
-    // 분단위 반복: "0 0/10 * * * ?"
-    return String.format("0 0/%d * * * ?", intervalInMinutes);
-}
-
-import lombok.RequiredArgsConstructor;
-import org.springframework.batch.core.*;
-import org.springframework.batch.core.explore.JobExplorer;
-import org.springframework.stereotype.Service;
-
-import java.util.*;
-
+//---------------------------------------
 @Service
 @RequiredArgsConstructor
-public class BatchJobMonitorService {
+public class QuartzJobService {
 
-    private final JobExplorer jobExplorer;
+    private final Scheduler scheduler;
 
-    /**
-     * 실행 중인 JobExecution 리스트를 반환
-     */
-    public List<JobExecution> getRunningJobExecutions(String jobName) {
-        List<JobExecution> result = new ArrayList<>();
+    public void scheduleJob(String jobName, String jobGroup, String cron, Class<? extends Job> jobClass) throws SchedulerException {
+        JobKey jobKey = new JobKey(jobName, jobGroup);
 
-        // JobInstance 목록 조회
-        List<JobInstance> instances = jobExplorer.getJobInstances(jobName, 0, 100);
-
-        for (JobInstance instance : instances) {
-            // 각 JobInstance에 대한 실행 정보 확인
-            Set<JobExecution> executions = jobExplorer.getJobExecutions(instance);
-            for (JobExecution exec : executions) {
-                if (exec.isRunning()) {
-                    result.add(exec);
-                }
-            }
+        if (scheduler.checkExists(jobKey)) {
+            scheduler.deleteJob(jobKey); // 기존 삭제
         }
 
-        return result;
+        JobDetail jobDetail = QuartzJobUtil.buildJobDetail(jobClass, jobName, jobGroup);
+        Trigger trigger = QuartzJobUtil.buildCronTrigger(jobName, jobGroup, cron);
+
+        scheduler.scheduleJob(jobDetail, trigger);
+    }
+
+    public void updateTrigger(String jobName, String jobGroup, String newCron) throws SchedulerException {
+        TriggerKey triggerKey = new TriggerKey(jobName + "Trigger", jobGroup);
+        Trigger newTrigger = QuartzJobUtil.buildCronTrigger(jobName, jobGroup, newCron);
+        scheduler.rescheduleJob(triggerKey, newTrigger);
+    }
+
+    public void pauseJob(String jobName, String jobGroup) throws SchedulerException {
+        scheduler.pauseJob(new JobKey(jobName, jobGroup));
+    }
+
+    public void resumeJob(String jobName, String jobGroup) throws SchedulerException {
+        scheduler.resumeJob(new JobKey(jobName, jobGroup));
+    }
+
+    public void deleteJob(String jobName, String jobGroup) throws SchedulerException {
+        scheduler.deleteJob(new JobKey(jobName, jobGroup));
+    }
+}
+
+
+//------------------------------------------------
+public class QuartzJobUtil {
+
+    public static JobDetail buildJobDetail(Class<? extends Job> jobClass, String jobName, String jobGroup) {
+        return JobBuilder.newJob(jobClass)
+                .withIdentity(jobName, jobGroup)
+                .storeDurably()
+                .build();
+    }
+
+    public static Trigger buildCronTrigger(String jobName, String jobGroup, String cronExpression) {
+        return TriggerBuilder.newTrigger()
+                .withIdentity(jobName + "Trigger", jobGroup)
+                .withSchedule(CronScheduleBuilder.cronSchedule(cronExpression))
+                .forJob(jobName, jobGroup)
+                .build();
+    }
+}
+//---------------------------------------------
+@Configuration
+public class QuartzConfig {
+
+    @Bean
+    public SpringBeanJobFactory springBeanJobFactory(ApplicationContext applicationContext) {
+        AutowiringSpringBeanJobFactory jobFactory = new AutowiringSpringBeanJobFactory();
+        jobFactory.setApplicationContext(applicationContext);
+        return jobFactory;
+    }
+
+    @Bean
+    public SchedulerFactoryBean schedulerFactoryBean(SpringBeanJobFactory jobFactory,
+                                                     Trigger asyncBatchTrigger,
+                                                     JobDetail asyncBatchJobDetail) {
+        SchedulerFactoryBean factory = new SchedulerFactoryBean();
+        factory.setJobFactory(jobFactory);
+        factory.setJobDetails(asyncBatchJobDetail);
+        factory.setTriggers(asyncBatchTrigger);
+        return factory;
+    }
+}
+
+//----------------------------------------------------------
+@Component
+public class AsyncBatchQuartzJob implements Job {
+
+    private final JobLauncher jobLauncher;
+    private final Job batchJob;
+
+    @Autowired
+    public AsyncBatchQuartzJob(JobLauncher jobLauncher, @Qualifier("myJob") Job batchJob) {
+        this.jobLauncher = jobLauncher;
+        this.batchJob = batchJob;
+    }
+
+    @Override
+    public void execute(JobExecutionContext context) throws JobExecutionException {
+        JobParameters params = new JobParametersBuilder()
+                .addLong("time", System.currentTimeMillis())
+                .toJobParameters();
+
+        try {
+            jobLauncher.run(batchJob, params);
+        } catch (Exception e) {
+            throw new JobExecutionException("Job 실행 중 오류", e);
+        }
     }
 }
