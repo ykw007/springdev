@@ -318,3 +318,33 @@ public class AsyncBatchQuartzJob implements Job {
         }
     }
 }
+
+
+@SpringBootTest
+@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.ANY)
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
+public class BatchJobTest {
+
+    @Autowired
+    private JobLauncher jobLauncher;
+
+    @Autowired
+    @Qualifier("myJob") // 대상 Job 이름
+    private Job job;
+
+    @Test
+    public void testBatchJobExecution() throws Exception {
+        // Given: Job 파라미터 구성
+        JobParameters jobParameters = new JobParametersBuilder()
+                .addLong("time", System.currentTimeMillis())
+                .toJobParameters();
+
+        // When: Job 실행
+        JobExecution jobExecution = jobLauncher.run(job, jobParameters);
+
+        // Then: 결과 검증
+        Assertions.assertEquals(BatchStatus.COMPLETED, jobExecution.getStatus());
+    }
+}
+
+
