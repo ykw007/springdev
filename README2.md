@@ -229,3 +229,39 @@ public static String toCronExpression(int intervalInMinutes) {
     // 분단위 반복: "0 0/10 * * * ?"
     return String.format("0 0/%d * * * ?", intervalInMinutes);
 }
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.batch.core.*;
+import org.springframework.batch.core.explore.JobExplorer;
+import org.springframework.stereotype.Service;
+
+import java.util.*;
+
+@Service
+@RequiredArgsConstructor
+public class BatchJobMonitorService {
+
+    private final JobExplorer jobExplorer;
+
+    /**
+     * 실행 중인 JobExecution 리스트를 반환
+     */
+    public List<JobExecution> getRunningJobExecutions(String jobName) {
+        List<JobExecution> result = new ArrayList<>();
+
+        // JobInstance 목록 조회
+        List<JobInstance> instances = jobExplorer.getJobInstances(jobName, 0, 100);
+
+        for (JobInstance instance : instances) {
+            // 각 JobInstance에 대한 실행 정보 확인
+            Set<JobExecution> executions = jobExplorer.getJobExecutions(instance);
+            for (JobExecution exec : executions) {
+                if (exec.isRunning()) {
+                    result.add(exec);
+                }
+            }
+        }
+
+        return result;
+    }
+}
