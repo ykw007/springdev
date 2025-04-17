@@ -370,3 +370,14 @@ public class QuartzAsyncBatchJob implements Job {
         log.info("Quartz job triggered and batch started asynchronously.");
     }
 }
+
+@Bean
+public TaskExecutor taskExecutor() {
+    ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+    executor.setCorePoolSize(5);  // 동시에 실행될 수 있는 job 수
+    executor.setMaxPoolSize(10);
+    executor.setQueueCapacity(25);
+    executor.setThreadNamePrefix("batch-exec-");
+    executor.initialize();
+    return executor;
+}
