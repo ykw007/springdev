@@ -347,4 +347,26 @@ public class BatchJobTest {
     }
 }
 
+@Slf4j
+@RequiredArgsConstructor
+public class QuartzAsyncBatchJob implements Job {
 
+    private final JobLauncher jobLauncher;
+    private final Job batchJob;
+    private final TaskExecutor taskExecutor;
+
+    @Override
+    public void execute(JobExecutionContext context) throws JobExecutionException {
+        taskExecutor.execute(() -> {
+            try {
+                JobParameters params = new JobParametersBuilder()
+                        .addLong("timestamp", System.currentTimeMillis())
+                        .toJobParameters();
+                jobLauncher.run(batchJob, params);
+            } catch (Exception e) {
+                log.error("Spring Batch job execution error", e);
+            }
+        });
+        log.info("Quartz job triggered and batch started asynchronously.");
+    }
+}
