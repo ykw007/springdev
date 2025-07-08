@@ -1,84 +1,156 @@
-Spring Boot REST API에서 문자열(String)을 `@RequestBody`로 받는 POST 컨트롤러가 있고, 해당 API를 **개발서버에서 실행**하며, **JUnit 테스트는 로컬에서 원격 API 호출로 테스트**하고 싶으신 경우, 다음과 같이 코드를 구성할 수 있습니다.
+////////////////////////////////////////////////////////////////////////////////////////
+package com.example.aspect;
 
----
+import com.example.config.StopWatchProperty;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.aspectj.lang.ProceedingJoinPoint;
+import org.aspectj.lang.annotation.*;
+import org.springframework.stereotype.Component;
 
-### ✅ 1. 컨트롤러 (개발서버 실행 중)
+@Slf4j
+@Aspect
+@Component
+@RequiredArgsConstructor
+public class QueryServiceAspect {
 
-```java
-// SampleController.java
-@RestController
-@RequestMapping("/api")
-public class SampleController {
+    private final StopWatchProperty stopWatchProperty;
 
-    @PostMapping("/echo")
-    public ResponseEntity<String> echoMessage(@RequestBody String message) {
-        return ResponseEntity.ok("Received: " + message);
+    @Pointcut("@annotation(com.example.aspect.logDisplay)")
+    public void logDisplayMethod() {}
+
+    @Around("logDisplayMethod()")
+    public Object aroundLogDisplay(ProceedingJoinPoint joinPoint) throws Throwable {
+        String methodName = joinPoint.getSignature().getName();
+        long startTime = System.nanoTime();  // 시작 시간 (ns 단위)
+
+        log.info("▶▶ 쿼리 실행 시작: {}", methodName);
+
+        Object result;
+        try {
+            result = joinPoint.proceed(); // 메서드 실행
+        } catch (Throwable ex) {
+            log.error("❌ 예외 발생: {}, error={}", methodName, ex.getMessage(), ex);
+            throw ex;
+        }
+
+        long durationMs = (System.nanoTime() - startTime) / 1_000_000;  // ms 단위로 변환
+        log.info("◀◀ 쿼리 실행 종료: {} (소요시간: {} ms)", methodName, durationMs);
+
+        // 제한 시간 초과 확인
+        Long timeout = stopWatchProperty.getTimeout().get(methodName);
+        if (timeout != null && durationMs > timeout) {
+            log.warn("⚠️ 실행 시간 초과: {} > {} ms (허용 시간)", durationMs, timeout);
+            // 필요 시 알림, 모니터링 연동, 예외 throw 등 가능
+        }
+
+        return result;
     }
 }
-```
 
----
 
-### ✅ 2. JUnit 테스트 (로컬에서 실행, 개발 서버에 POST 요청)
+////////////////////////////////////////////////////////////////////////////////////////
+package com.example.aspect;
 
-```java
-// SampleControllerTest.java
-import org.junit.jupiter.api.Test;
-import org.springframework.http.*;
-import org.springframework.web.client.RestTemplate;
+import com.example.config.StopWatchProperty;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.aspectj.lang.ProceedingJoinPoint;
+import org.aspectj.lang.annotation.*;
+import org.springframework.stereotype.Component;
+import org.springframework.util.StopWatch;
 
-import static org.junit.jupiter.api.Assertions.*;
+@Slf4j
+@Aspect
+@Component
+@RequiredArgsConstructor
+public class QueryServiceAspect {
 
-public class SampleControllerTest {
+    private final StopWatchProperty stopWatchProperty;
 
-    private final String DEV_SERVER_URL = "http://your-dev-server.com/api/echo"; // 개발서버 주소
+    @Pointcut("@annotation(com.example.aspect.logDisplay)")
+    public void logDisplayMethod() {}
 
-    @Test
-    public void testPostStringToDevServer() {
-        RestTemplate restTemplate = new RestTemplate();
+    @Around("logDisplayMethod()")
+    public Object aroundLogDisplay(ProceedingJoinPoint joinPoint) throws Throwable {
+        StopWatch stopWatch = new StopWatch();
+        String methodName = joinPoint.getSignature().getName();
 
-        String testMessage = "Hello from test!";
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.TEXT_PLAIN); // 문자열 전송 시 중요
+        log.info("▶▶ 쿼리 실행 시작: {}", methodName);
 
-        HttpEntity<String> request = new HttpEntity<>(testMessage, headers);
+        Object result;
 
-        ResponseEntity<String> response = restTemplate.exchange(
-                DEV_SERVER_URL,
-                HttpMethod.POST,
-                request,
-                String.class
-        );
+        try {
+            stopWatch.start();
+            result = joinPoint.proceed();
+        } catch (Throwable ex) {
+            log.error("❌ 쿼리 실행 중 예외 발생: {}, error={}", methodName, ex.getMessage(), ex);
+            throw ex;
+        } finally {
+            stopWatch.stop();
+            long duration = stopWatch.getTotalTimeMillis();
+            log.info("◀◀ 쿼리 실행 종료: {} (소요시간: {} ms)", methodName, duration);
 
-        assertEquals(HttpStatus.OK, response.getStatusCode());
-        assertNotNull(response.getBody());
-        assertTrue(response.getBody().contains("Received:"));
+            Long timeout = stopWatchProperty.getTimeout().get(methodName);
+            if (timeout != null && duration > timeout) {
+                log.warn("⚠ 쿼리 실행 시간 초과: {} > {} ms (허용)", duration, timeout);
+                // 필요시 알림 또는 예외 throw 가능
+            }
+        }
+
+        return result;
     }
 }
-```
 
----
+////////////////////////////////////////////////////////////////////////////////////////
+package com.example.aspect;
 
-### ✅ 주의사항
+import lombok.extern.slf4j.Slf4j;
+import org.aspectj.lang.ProceedingJoinPoint;
+import org.aspectj.lang.annotation.*;
+import org.springframework.stereotype.Component;
+import org.springframework.util.StopWatch;
 
-* **Content-Type**: `MediaType.TEXT_PLAIN`으로 설정해야 `String` 수신이 제대로 됨.
-* **CORS 설정**: 개발서버에 테스트 시 IP 접근 허용 및 `@CrossOrigin` 고려.
-* **보안**: 인증이 필요한 경우 JWT, BasicAuth 등의 인증 헤더 추가 필요.
-* **RestTemplate 대체**: Spring Boot 3 이상에서는 `WebClient` 사용 권장.
+@Slf4j
+@Aspect
+@Component
+public class QueryServiceAspect {
 
----
+    /**
+     * @brief logDisplay 어노테이션이 붙은 메서드를 AOP 대상 포인트컷으로 지정
+     */
+    @Pointcut("@annotation(com.example.aspect.logDisplay)")
+    public void logDisplayMethod() {}
 
-### 🔄 WebClient 사용 예시 (대안)
+    /**
+     * @brief 쿼리 실행 시간 측정용 AOP
+     * @param joinPoint 대상 메서드
+     * @return 실제 메서드 실행 결과
+     * @throws Throwable 예외 발생 시 그대로 전달
+     * @history 2025.07.08 v1.0 최초 작성
+     */
+    @Around("logDisplayMethod()")
+    public Object aroundLogDisplay(ProceedingJoinPoint joinPoint) throws Throwable {
+        StopWatch stopWatch = new StopWatch();  // 요청마다 새 인스턴스 생성
+        String methodName = joinPoint.getSignature().toShortString();
 
-```java
-WebClient client = WebClient.builder().baseUrl("http://your-dev-server.com").build();
+        log.info("▶▶ 쿼리 실행 시작: {}", methodName);
 
-String response = client.post()
-    .uri("/api/echo")
-    .contentType(MediaType.TEXT_PLAIN)
-    .bodyValue("Hello WebClient!")
-    .retrieve()
-    .bodyToMono(String.class)
-    .block();
-```
+        Object result;
+
+        try {
+            stopWatch.start();  // 안전하게 시작
+            result = joinPoint.proceed();  // 실제 쿼리 실행
+        } catch (Throwable ex) {
+            log.error("❌ 쿼리 실행 중 예외 발생: {}, error={}", methodName, ex.getMessage(), ex);
+            throw ex;  // 예외는 그대로 전달 (트랜잭션 영향 없음)
+        } finally {
+            stopWatch.stop();
+            log.info("◀◀ 쿼리 실행 종료: {} (소요시간: {} ms)", methodName, stopWatch.getTotalTimeMillis());
+        }
+
+        return result;
+    }
+}
+
 
