@@ -1,7 +1,87 @@
-아래는 \*\*Spring Kafka의 `concurrency`\*\*와 \*\*Spring Bean 기반 `ThreadPoolTaskExecutor`\*\*를 혼합하여,
-**5대 서버 × 각 서버 5스레드 = 총 25개의 병렬 Consumer**가 최적 동작하도록 구성한 샘플입니다.
+현재 코드의 문제점은 다음과 같습니다:
+
+1. **스레드풀 생명주기 관리 문제**
+
+   * `ExecutorService`가 Spring 컨텍스트와 함께 안전하게 관리되지 않음.
+   * `shutdown()`이 명시적으로 호출되지 않으면 배포 시 종료가 지연될 수 있음.
+
+2. **Spring Kafka의 컨테이너 관리 기능과 중복**
+
+   * Spring Kafka가 자체적으로 `concurrency` 옵션을 제공하는데, 추가적으로 별도의 스레드풀을 만들어 사용하면 **불필요한 중첩 멀티스레드** 구조가 됩니다.
+
+3. **고정 스레드풀(Executors.newFixedThreadPool(10)) 문제**
+
+   * 요청이 몰리면 큐에 작업이 무한히 쌓여 메모리 사용량이 증가할 수 있음.
 
 ---
+
+## ✅ **수정된 코드 (Spring Bean 기반 ThreadPool 관리 + 안전한 종료)**
+
+Spring이 관리하는 `ThreadPoolTaskExecutor`를 사용하여 스레드풀을 관리하면
+서버 종료 시 안전하게 리소스를 해제하고, Kubernetes Rolling Update 시에도 정상 종료됩니다.
+
+```java
+package com.example.kafka.listener;
+
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.kafka.listener.MessageListener;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.stereotype.Component;
+
+@Component
+public class MultiThreadedKafkaListener implements MessageListener<String, String> {
+
+    private final ThreadPoolTaskExecutor executor;
+
+    @Autowired
+    public MultiThreadedKafkaListener(ThreadPoolTaskExecutor executor) {
+        this.executor = executor;
+    }
+
+    @Override
+    public void onMessage(ConsumerRecord<String, String> record) {
+        executor.submit(() -> processMessage(record));
+    }
+
+    private void processMessage(ConsumerRecord<String, String> record) {
+        System.out.printf("Thread [%s] processing message: key=%s, value=%s%n",
+                Thread.currentThread().getName(),
+                record.key(),
+                record.value());
+        // 비즈니스 로직 처리
+    }
+}
+```
+
+---
+
+### ✅ **스레드풀 Bean 설정 추가 (Spring 관리)**
+
+```java
+package com.example.kafka.config;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+
+@Configuration
+public class KafkaExecutorConfig {
+
+    @Bean(name = "kafkaExecutor")
+    public ThreadPoolTaskExecutor kafkaExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(10);        // 기본 스레드 수
+        executor.setMaxPoolSize(20);         // 최대 스레드 수
+        executor.setQueueCapacity(500);      // 대기 큐 크기
+        executor.setThreadNamePrefix("kafka-worker-");
+        executor.setWaitForTasksToCompleteOnShutdown(true); // 안전한 종료
+        executor.initialize();
+        return executor;
+    }
+}
+```
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 ## ✅ 1. **Kafka Listener 설정 (application.yml)**
 
