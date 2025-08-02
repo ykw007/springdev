@@ -244,7 +244,7 @@ public class GracefulShutdownConfig implements DisposableBean {
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 
-맞습니다. **MyBatis**를 이용하여 Kafka Consumer 메시지를 **멀티스레드(10개 이상)로 동시에 Insert/Update**하면, DB 부하가 크게 발생할 수 있습니다.
+Kafka Consumer 메시지를 멀티스레드(10개 이상)로 동시에 Insert/Update하면, DB 부하가 크게 발생 가능
 
 ---
 
