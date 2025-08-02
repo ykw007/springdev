@@ -242,3 +242,147 @@ public class GracefulShutdownConfig implements DisposableBean {
 * **Graceful Shutdown** → Rolling Update 및 Pod 종료 시 메시지 유실 없음
 * **TPS 500 이상 안정 처리 가능**
 
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+맞습니다. **MyBatis**를 이용하여 Kafka Consumer 메시지를 **멀티스레드(10개 이상)로 동시에 Insert/Update**하면, DB 부하가 크게 발생할 수 있습니다.
+
+---
+
+## ✅ **왜 MyBatis + 멀티스레드 환경에서 부하가 커지나?**
+
+1. **스레드 수 = 동시 DB Connection 수**
+
+   * MyBatis는 내부적으로 JDBC/HikariCP Connection Pool을 사용
+   * 10개 스레드가 동시에 Insert/Update → Connection Pool이 빠르게 소진될 수 있음
+
+2. **트랜잭션/Auto Commit 오버헤드**
+
+   * 각 메시지 처리 시 매번 commit → DB I/O 부하 증가
+
+3. **단건 Insert/Update 반복**
+
+   * MyBatis가 단건 SQL을 계속 실행 → 대량 메시지 시 DB CPU/디스크 I/O 부담
+
+---
+
+## ✅ **부하를 줄이는 전략 (MyBatis 환경 최적화)**
+
+### 1️⃣ **HikariCP Connection Pool 확장**
+
+* ThreadPool의 병렬 수(예: 50)보다 조금 큰 Pool Size 필요
+
+```yaml
+spring:
+  datasource:
+    hikari:
+      maximum-pool-size: 60
+      minimum-idle: 10
+```
+
+---
+
+### 2️⃣ **MyBatis Batch Mode 사용**
+
+* 단건 `insert` 대신 **Batch Insert** → 네트워크 Round Trip 및 DB commit 횟수 감소
+* MyBatis에서 Batch 모드 활성화:
+
+```yaml
+mybatis:
+  configuration:
+    default-executor-type: BATCH
+```
+
+* Mapper 예시:
+
+```java
+void insertBatch(@Param("list") List<MyData> dataList);
+```
+
+```xml
+<insert id="insertBatch">
+    INSERT INTO logs (id, msg)
+    VALUES
+    <foreach collection="list" item="item" separator=",">
+        (#{item.id}, #{item.msg})
+    </foreach>
+</insert>
+```
+
+---
+
+### 3️⃣ **Kafka Consumer → Buffer → MyBatis Batch Worker 패턴**
+
+* 메시지 수신 시 **바로 DB 호출 X**
+* ✅ **Buffer(List) 에 모아 Batch 단위(100\~500건)로 MyBatis Insert/Update 실행**
+
+---
+
+### 4️⃣ **멀티스레드 제어 (DB Worker 전용 스레드풀 사용)**
+
+* Kafka Consumer 스레드와 별개로 **DB Worker 스레드**를 분리
+* ✅ Consumer는 DB Worker Queue에 데이터만 전달 → Worker가 Batch Insert 처리
+
+---
+
+## ✅ **Spring Boot + MyBatis Batch Worker 예시**
+
+```java
+@Service
+public class MyBatisDbWorker {
+
+    private final MyMapper myMapper;
+    private final List<MyData> buffer = Collections.synchronizedList(new ArrayList<>());
+    private static final int BATCH_SIZE = 200;
+
+    public MyBatisDbWorker(MyMapper myMapper) {
+        this.myMapper = myMapper;
+    }
+
+    public void addMessage(MyData data) {
+        buffer.add(data);
+        if (buffer.size() >= BATCH_SIZE) {
+            flush();
+        }
+    }
+
+    @Transactional
+    public synchronized void flush() {
+        if (buffer.isEmpty()) return;
+        List<MyData> batch = new ArrayList<>(buffer);
+        buffer.clear();
+
+        // ✅ MyBatis Batch Insert 실행
+        myMapper.insertBatch(batch);
+    }
+}
+```
+
+Kafka Listener에서는:
+
+```java
+bizExecutor.submit(() -> myBatisDbWorker.addMessage(new MyData(id, msg)));
+```
+
+---
+
+## ✅ **멀티스레드 부하 최소화 패턴**
+
+| 방법                                        | 설명                           |
+| ----------------------------------------- | ---------------------------- |
+| **Batch Insert (MyBatis BATCH Executor)** | DB 부하 70\~90% 감소             |
+| **DB Worker Queue 패턴**                    | Consumer와 DB I/O 분리          |
+| **Connection Pool 튜닝**                    | ThreadPool 수 ≥ DB Connection |
+| **Batch 크기 최적화**                          | 100\~500건 단위 추천              |
+| **인덱스 최소화**                               | 대량 Insert 시 인덱스 경합 감소        |
+
+---
+
+## ✅ **결론**
+
+* 단순히 **10개 스레드에서 MyBatis 단건 Insert/Update** → DB Connection 경합 + I/O 폭증 가능
+* ✅ **Batch Mode + Worker Queue** 적용 시
+
+  * **TPS 500 이상 안정 처리 가능**
+  * DB 부하 크게 감소
+
+
