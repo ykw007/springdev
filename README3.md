@@ -1,220 +1,339 @@
-///////////////////////////////////////////////////////
-
+```xml
+<dependencies>
+    <!-- Spring Boot Batch -->
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-batch</artifactId>
+    </dependency>
+    
+    <!-- Renjin -->
+    <dependency>
+        <groupId>org.renjin</groupId>
+        <artifactId>renjin-script-engine</artifactId>
+        <version>3.5-beta76</version>
+    </dependency>
+    
+    <!-- Apache Commons Pool2 -->
+    <dependency>
+        <groupId>org.apache.commons</groupId>
+        <artifactId>commons-pool2</artifactId>
+    </dependency>
+    
+    <!-- Lombok -->
+    <dependency>
+        <groupId>org.projectlombok</groupId>
+        <artifactId>lombok</artifactId>
+        <optional>true</optional>
+    </dependency>
+</dependencies>
+```
+/////////////////////////////////////////////////////////////////////////////////
 ```yaml
 spring:
   batch:
     job:
       enabled: true
 
-# Renjin 설정
+# Renjin Pool 설정
 renjin:
   pool:
-    size: 30
-    acquire-timeout-seconds: 30
-```
+    max-total: 30           # 최대 엔진 수
+    min-idle: 10            # 최소 유지 엔진 수
+    max-wait-millis: 30000  # 대기 최대 시간 (30초)
 
-////////////////////////////////////////////////////////////////
+logging:
+  level:
+    com.example.batch: INFO
+```
+////////////////////////////////////////////////////////////////////////////////
 
 ```java
-package com.example.batch.config;
+package com.example.batch.config.pool;
 
+import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.pool2.BasePooledObjectFactory;
+import org.apache.commons.pool2.PooledObject;
+import org.apache.commons.pool2.impl.DefaultPooledObject;
 import org.renjin.script.RenjinScriptEngine;
 import org.renjin.script.RenjinScriptEngineFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
-import lombok.extern.slf4j.Slf4j;
 
-import javax.annotation.PostConstruct;
-import javax.annotation.PreDestroy;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
+import javax.script.ScriptException;
 
 @Slf4j
-@Component
-public class RenjinEnginePool {
+public class RenjinScriptEnginePoolFactory extends BasePooledObjectFactory<RenjinScriptEngine> {
     
-    @Value("${renjin.pool.size:30}")
-    private int poolSize;
+    private final RenjinScriptEngineFactory engineFactory;
     
-    @Value("${renjin.pool.acquire-timeout-seconds:30}")
-    private int acquireTimeoutSeconds;
-    
-    private BlockingQueue<RenjinScriptEngine> enginePool;
-    private final RenjinScriptEngineFactory factory;
-    
-    public RenjinEnginePool() {
-        this.factory = new RenjinScriptEngineFactory();
+    public RenjinScriptEnginePoolFactory() {
+        this.engineFactory = new RenjinScriptEngineFactory();
     }
     
-    @PostConstruct
-    public void initialize() {
-        // 설정 검증
-        validateConfiguration();
+    @Override
+    public RenjinScriptEngine create() throws Exception {
+        log.debug("Creating new RenjinScriptEngine instance");
+        return engineFactory.getScriptEngine();
+    }
+    
+    @Override
+    public PooledObject<RenjinScriptEngine> wrap(RenjinScriptEngine engine) {
+        return new DefaultPooledObject<>(engine);
+    }
+    
+    @Override
+    public boolean validateObject(PooledObject<RenjinScriptEngine> pooledObject) {
+        try {
+            RenjinScriptEngine engine = pooledObject.getObject();
+            Object result = engine.eval("1 + 1");
+            return result != null && ((Number) result).intValue() == 2;
+        } catch (ScriptException e) {
+            log.error("RenjinScriptEngine validation failed", e);
+            return false;
+        }
+    }
+    
+    @Override
+    public void destroyObject(PooledObject<RenjinScriptEngine> pooledObject) throws Exception {
+        log.debug("Destroying RenjinScriptEngine");
+    }
+}
+```
+
+//////////////////////////////////////////////////////////////////////
+
+```java
+package com.example.batch.config.pool;
+
+import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.pool2.impl.GenericObjectPool;
+import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
+import org.renjin.script.RenjinScriptEngine;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+import java.time.Duration;
+
+@Slf4j
+@Configuration
+public class RenjinEnginePoolConfig {
+    
+    @Value("${renjin.pool.max-total:30}")
+    private int maxTotal;
+    
+    @Value("${renjin.pool.min-idle:10}")
+    private int minIdle;
+    
+    @Value("${renjin.pool.max-wait-millis:30000}")
+    private long maxWaitMillis;
+    
+    @Bean
+    public GenericObjectPoolConfig<RenjinScriptEngine> renjinPoolConfig() {
+        GenericObjectPoolConfig<RenjinScriptEngine> config = new GenericObjectPoolConfig<>();
         
-        // 풀 초기화
-        this.enginePool = new LinkedBlockingQueue<>(poolSize);
+        // 필수 설정
+        config.setMaxTotal(maxTotal);
+        config.setMaxIdle(maxTotal);
+        config.setMinIdle(minIdle);
+        config.setMaxWait(Duration.ofMillis(maxWaitMillis));
         
-        log.info("Initializing Renjin Engine Pool with size: {}, timeout: {}s", 
-                 poolSize, acquireTimeoutSeconds);
+        // 권장 기본값
+        config.setTestWhileIdle(true);
+        config.setTimeBetweenEvictionRuns(Duration.ofMinutes(1));
+        config.setMinEvictableIdleTime(Duration.ofMinutes(5));
+        config.setBlockWhenExhausted(true);
+        config.setLifo(true);
+        config.setJmxEnabled(false);
+        
+        log.info("Renjin Pool Config - MaxTotal: {}, MinIdle: {}, MaxWait: {}ms",
+                 maxTotal, minIdle, maxWaitMillis);
+        
+        return config;
+    }
+    
+    @Bean(destroyMethod = "close")
+    public GenericObjectPool<RenjinScriptEngine> renjinEnginePool(
+            GenericObjectPoolConfig<RenjinScriptEngine> poolConfig) {
+        
+        log.info("Initializing Renjin Engine Pool");
         long startTime = System.currentTimeMillis();
         
-        for (int i = 0; i < poolSize; i++) {
-            try {
-                RenjinScriptEngine engine = factory.getScriptEngine();
-                enginePool.offer(engine);
-                
-                if ((i + 1) % 10 == 0 || (i + 1) == poolSize) {
-                    log.info("Created {}/{} Renjin engines", i + 1, poolSize);
-                }
-                
-            } catch (Exception e) {
-                log.error("Failed to create Renjin engine {}/{}", i + 1, poolSize, e);
-                throw new RuntimeException("Failed to initialize Renjin engine pool", e);
-            }
+        RenjinScriptEnginePoolFactory factory = new RenjinScriptEnginePoolFactory();
+        GenericObjectPool<RenjinScriptEngine> pool = new GenericObjectPool<>(factory, poolConfig);
+        
+        try {
+            pool.preparePool();
+            log.info("Renjin Engine Pool pre-warmed with {} instances", minIdle);
+        } catch (Exception e) {
+            log.warn("Failed to pre-warm Renjin Engine Pool", e);
         }
         
         long elapsed = System.currentTimeMillis() - startTime;
-        log.info("Renjin Engine Pool initialized successfully. Pool size: {}, Timeout: {}s, Took: {}ms", 
-                 poolSize, acquireTimeoutSeconds, elapsed);
+        log.info("Renjin Engine Pool initialized in {}ms", elapsed);
+        
+        return pool;
     }
+}
+```
+//////////////////////////////////////////////////////////////////////
+
+```java
+package com.example.batch.config.pool;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.pool2.impl.GenericObjectPool;
+import org.renjin.script.RenjinScriptEngine;
+import org.springframework.stereotype.Component;
+
+@Slf4j
+@Component
+@RequiredArgsConstructor
+public class RenjinEnginePoolManager {
+    
+    private final GenericObjectPool<RenjinScriptEngine> enginePool;
     
     /**
      * 풀에서 Renjin 엔진을 가져옵니다.
-     * 타임아웃 시간 내에 사용 가능한 엔진이 없으면 예외 발생
      */
-    public RenjinScriptEngine acquire() throws InterruptedException {
-        log.debug("Attempting to acquire Renjin engine. Available: {}/{}", 
-                  enginePool.size(), poolSize);
+    public RenjinScriptEngine borrowEngine() throws Exception {
+        log.debug("Borrowing RenjinScriptEngine. Active: {}, Idle: {}",
+                  enginePool.getNumActive(), enginePool.getNumIdle());
         
-        RenjinScriptEngine engine = enginePool.poll(acquireTimeoutSeconds, TimeUnit.SECONDS);
+        RenjinScriptEngine engine = enginePool.borrowObject();
         
-        if (engine == null) {
-            log.error("Failed to acquire Renjin engine within {} seconds. Pool exhausted!", 
-                      acquireTimeoutSeconds);
-            throw new RuntimeException(
-                String.format("Renjin engine pool exhausted (timeout: %ds)", acquireTimeoutSeconds));
-        }
+        log.debug("RenjinScriptEngine borrowed. Active: {}, Idle: {}",
+                  enginePool.getNumActive(), enginePool.getNumIdle());
         
-        log.debug("Renjin engine acquired. Remaining: {}/{}", enginePool.size(), poolSize);
         return engine;
     }
     
     /**
-     * 사용한 엔진을 풀에 반환합니다.
+     * 엔진을 풀에 반환합니다.
      */
-    public void release(RenjinScriptEngine engine) {
+    public void returnEngine(RenjinScriptEngine engine) {
         if (engine == null) {
-            log.warn("Attempted to release null engine");
+            log.warn("Attempted to return null engine");
             return;
         }
         
-        boolean returned = enginePool.offer(engine);
-        if (returned) {
-            log.debug("Renjin engine released. Available: {}/{}", enginePool.size(), poolSize);
-        } else {
-            log.error("Failed to return engine to pool. Pool might be full!");
+        enginePool.returnObject(engine);
+        log.debug("RenjinScriptEngine returned. Active: {}, Idle: {}",
+                  enginePool.getNumActive(), enginePool.getNumIdle());
+    }
+    
+    /**
+     * 손상된 엔진을 풀에서 제거합니다.
+     */
+    public void invalidateEngine(RenjinScriptEngine engine) {
+        if (engine == null) {
+            return;
+        }
+        
+        try {
+            log.warn("Invalidating RenjinScriptEngine");
+            enginePool.invalidateObject(engine);
+        } catch (Exception e) {
+            log.error("Error invalidating engine", e);
         }
     }
     
     /**
-     * 풀의 현재 상태 정보를 반환합니다.
+     * 풀 상태 조회
      */
     public PoolStatus getStatus() {
-        int available = enginePool.size();
-        int inUse = poolSize - available;
-        return new PoolStatus(poolSize, available, inUse, acquireTimeoutSeconds);
+        return new PoolStatus(
+            enginePool.getMaxTotal(),
+            enginePool.getNumActive(),
+            enginePool.getNumIdle(),
+            enginePool.getNumWaiters()
+        );
     }
     
     /**
-     * 설정된 풀 크기를 반환합니다.
+     * 풀 상태 정보
      */
-    public int getPoolSize() {
-        return poolSize;
-    }
-    
-    /**
-     * 설정된 타임아웃 시간을 반환합니다.
-     */
-    public int getAcquireTimeoutSeconds() {
-        return acquireTimeoutSeconds;
-    }
-    
-    @PreDestroy
-    public void destroy() {
-        log.info("Destroying Renjin Engine Pool");
-        enginePool.clear();
-        log.info("Renjin Engine Pool destroyed");
-    }
-    
     public static class PoolStatus {
-        private final int totalSize;
-        private final int available;
-        private final int inUse;
-        private final int timeoutSeconds;
+        private final int maxTotal;
+        private final int numActive;
+        private final int numIdle;
+        private final int numWaiters;
         
-        public PoolStatus(int totalSize, int available, int inUse, int timeoutSeconds) {
-            this.totalSize = totalSize;
-            this.available = available;
-            this.inUse = inUse;
-            this.timeoutSeconds = timeoutSeconds;
+        public PoolStatus(int maxTotal, int numActive, int numIdle, int numWaiters) {
+            this.maxTotal = maxTotal;
+            this.numActive = numActive;
+            this.numIdle = numIdle;
+            this.numWaiters = numWaiters;
         }
         
-        public int getTotalSize() { 
-            return totalSize; 
-        }
-        
-        public int getAvailable() { 
-            return available; 
-        }
-        
-        public int getInUse() { 
-            return inUse; 
-        }
-        
-        public int getTimeoutSeconds() {
-            return timeoutSeconds;
-        }
+        public int getMaxTotal() { return maxTotal; }
+        public int getNumActive() { return numActive; }
+        public int getNumIdle() { return numIdle; }
+        public int getNumWaiters() { return numWaiters; }
         
         public double getUtilizationRate() {
-            return totalSize > 0 ? (inUse * 100.0 / totalSize) : 0.0;
+            return maxTotal > 0 ? (numActive * 100.0 / maxTotal) : 0.0;
         }
         
         @Override
         public String toString() {
-            return String.format("RenjinPool[total=%d, available=%d, inUse=%d, utilization=%.2f%%, timeout=%ds]", 
-                               totalSize, available, inUse, getUtilizationRate(), timeoutSeconds);
+            return String.format(
+                "PoolStatus[maxTotal=%d, active=%d, idle=%d, waiters=%d, utilization=%.2f%%]",
+                maxTotal, numActive, numIdle, numWaiters, getUtilizationRate()
+            );
         }
     }
 }
+```
 
+/////////////////////////////////////////////////////////////////////
+
+```java
+package com.example.batch.service;
+
+import com.example.batch.config.pool.RenjinEnginePoolManager;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.renjin.script.RenjinScriptEngine;
+import org.springframework.stereotype.Service;
+
+import javax.script.ScriptException;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class EcoAnalysisService {
     
-//////////////////////////////////
+    private final RenjinEnginePoolManager poolManager;
+    
+    /**
+     * Wilcoxon test를 수행하여 p-value를 반환합니다.
+     */
     public Double performWilcoxonTest(double[] experimentGroup, double[] controlGroup) {
         RenjinScriptEngine engine = null;
         
         try {
-            engine = renjinEnginePool.acquire();
+            engine = poolManager.borrowEngine();
             return executeWilcoxTest(engine, experimentGroup, controlGroup);
-            
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.error("Thread interrupted while acquiring Renjin engine", e);
-            throw new RuntimeException("Failed to acquire Renjin engine", e);
             
         } catch (Exception e) {
             log.error("Error during Wilcoxon test execution", e);
+            
+            if (engine != null) {
+                poolManager.invalidateEngine(engine);
+                engine = null;
+            }
+            
             throw new RuntimeException("Wilcoxon test failed", e);
             
         } finally {
             if (engine != null) {
-                renjinEnginePool.release(engine);
+                poolManager.returnEngine(engine);
             }
         }
     }
     
-    private Double executeWilcoxTest(RenjinScriptEngine engine, 
-                                     double[] experimentGroup, 
+    private Double executeWilcoxTest(RenjinScriptEngine engine,
+                                     double[] experimentGroup,
                                      double[] controlGroup) throws ScriptException {
         
         engine.put("experiment", experimentGroup);
@@ -231,7 +350,63 @@ public class RenjinEnginePool {
         return ((Number) result).doubleValue();
     }
     
-    public RenjinEnginePool.PoolStatus getPoolStatus() {
-        return renjinEnginePool.getStatus();
+    public RenjinEnginePoolManager.PoolStatus getPoolStatus() {
+        return poolManager.getStatus();
+    }
+}
+```
+
+//////////////////////////////////////////////////////////////////////
+
+```java
+package com.example.batch.processor;
+
+import com.example.batch.domain.Defect;
+import com.example.batch.domain.EcoResult;
+import com.example.batch.repository.LotRepository;
+import com.example.batch.service.EcoAnalysisService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.batch.item.ItemProcessor;
+import org.springframework.stereotype.Component;
+
+@Slf4j
+@Component
+@RequiredArgsConstructor
+public class EcoAnalysisProcessor implements ItemProcessor<Defect, EcoResult> {
+    
+    private final EcoAnalysisService ecoAnalysisService;
+    private final LotRepository lotRepository;
+    
+    @Override
+    public EcoResult process(Defect defect) throws Exception {
+        long startTime = System.currentTimeMillis();
+        
+        try {
+            // Lot 데이터 조회
+            double[] experimentGroup = lotRepository.findExperimentData(defect.getId());
+            double[] controlGroup = lotRepository.findControlData(defect.getId());
+            
+            // Wilcoxon test 수행
+            Double pValue = ecoAnalysisService.performWilcoxonTest(experimentGroup, controlGroup);
+            
+            // 결과 생성
+            EcoResult result = EcoResult.builder()
+                    .defectId(defect.getId())
+                    .pValue(pValue)
+                    .experimentSize(experimentGroup.length)
+                    .controlSize(controlGroup.length)
+                    .build();
+            
+            long elapsed = System.currentTimeMillis() - startTime;
+            log.debug("Defect {} processed in {}ms, p-value: {}", 
+                     defect.getId(), elapsed, pValue);
+            
+            return result;
+            
+        } catch (Exception e) {
+            log.error("Failed to process defect: {}", defect.getId(), e);
+            throw e;
+        }
     }
 }
