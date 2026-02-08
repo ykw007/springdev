@@ -366,3 +366,177 @@ docker run -d \
 | **Renjin 엔진 인스턴스** | `ThreadLocal<ScriptEngine>` | 스레드 안전성 + 성능 |
 | **메모리 제한** | `--memory="16g"` | OOM 방지 및 GC 효율성 |
 
+
+
+
+## 대용량 처리 Spring Batch 시스템에서 Renjin 엔진을 사용하는 Docker 컨테이너 설정 사례
+
+다음은 Spring Batch와 Renjin 엔진을 사용하는 Docker 컨테이너 설정의 예시입니다. 이 설정은 대용량 데이터를 처리할 수 있도록 최적화되어 있습니다.
+
+### 1. **Dockerfile 설정**
+
+Dockerfile은 애플리케이션을 빌드하고 최적화된 실행 환경을 설정하는 데 사용됩니다.
+
+```dockerfile
+# 베이스 이미지 설정
+FROM openjdk:11-jre-slim
+
+# JVM 및 Renjin 설정
+ENV JAVA_OPTS="-XX:ActiveProcessorCount=4 \
+  -XX:+UseG1GC \
+  -XX:MaxGCPauseMillis=200 \
+  -XX:+ParallelRefProcEnabled \
+  -Djava.security.egd=file:/dev/./urandom \
+  -Drenjin.compiler.type=JIT \
+  -Drenjin.enable.lazy.evaluation=true \
+  -Drenjin.memory.limit=2048"  # Renjin 메모리 제한
+
+# 메모리 설정
+ENV JVM_MEMORY="-Xms4g -Xmx8g"  # 최소 4GB, 최대 8GB 메모리 할당
+
+# 애플리케이션 JAR 복사
+COPY app.jar application.jar
+
+# ENTRYPOINT 설정
+ENTRYPOINT ["sh", "-c", "java ${JVM_MEMORY} ${JAVA_OPTS} -jar application.jar"]
+```
+
+### 2. **docker-compose.yml 설정**
+
+Docker Compose를 사용하여 컨테이너를 쉽게 관리하고 설정할 수 있습니다. 아래는 Spring Batch와 Renjin을 위한 Compose 설정 예시입니다.
+
+```yaml
+version: '3.8'
+
+services:
+  spring-batch-app:
+    build: .
+    image: spring-batch-renjin:latest
+    container_name: spring_batch_renjin
+    cpus: '4.0'  # 컨테이너에 할당할 CPU 수
+    mem_limit: 8g  # 컨테이너에 할당할 메모리
+    environment:
+      JAVA_OPTS: "-XX:ActiveProcessorCount=4 -XX:+UseG1GC -Djava.security.egd=file:/dev/./urandom"
+      JVM_MEMORY: "-Xms4g -Xmx8g"
+    volumes:
+      - ./data:/data  # 데이터 파일을 호스트와 공유
+    networks:
+      - spring-network
+
+networks:
+  spring-network:
+    driver: bridge
+```
+
+### 3. **Spring Batch 설정**
+
+Spring Batch의 멀티스레드 처리를 위해 `TaskExecutor`를 설정하고 Renjin 엔진을 사용하는 `ItemProcessor`를 정의합니다.
+
+```java
+import org.springframework.batch.core.Step;
+import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
+import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;
+import org.springframework.batch.item.ItemProcessor;
+import org.springframework.batch.item.ItemReader;
+import org.springframework.batch.item.ItemWriter;
+import org.springframework.batch.item.support.ListItemReader;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.core.task.TaskExecutor;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+
+@Configuration
+@EnableBatchProcessing
+public class BatchConfig {
+
+    @Bean
+    public ItemReader<InputData> reader() {
+        // 데이터 읽기 로직 구현
+        return new ListItemReader<>(getInputData());
+    }
+
+    @Bean
+    public ItemProcessor<InputData, OutputData> processor() {
+        return new RenjinProcessor();  // Renjin을 사용하는 프로세서
+    }
+
+    @Bean
+    public ItemWriter<OutputData> writer() {
+        // 데이터 쓰기 로직 구현
+        return new DatabaseItemWriter();  // DB에 저장하는 예시
+    }
+
+    @Bean
+    public TaskExecutor taskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(4);
+        executor.setMaxPoolSize(8);
+        executor.setQueueCapacity(256);
+        executor.setThreadNamePrefix("batch-renjin-");
+        executor.initialize();
+        return executor;
+    }
+
+    @Bean
+    public Step renjinProcessingStep(StepBuilderFactory stepBuilderFactory) {
+        return stepBuilderFactory.get("renjinProcessingStep")
+                .<InputData, OutputData>chunk(100)
+                .reader(reader())
+                .processor(processor())
+                .writer(writer())
+                .taskExecutor(taskExecutor())
+                .throttleLimit(8)
+                .build();
+    }
+    
+    // 입력 데이터 및 기타 필요한 메서드 구현
+}
+```
+
+### 4. **Renjin 엔진 설정**
+
+Renjin 엔진을 사용하는 `ItemProcessor`의 예시입니다. R 스크립트를 실행하여 데이터를 처리합니다.
+
+```java
+import org.renjin.script.RenjinScriptEngineFactory;
+import org.renjin.sexp.SEXP;
+
+import javax.script.ScriptEngine;
+import javax.script.ScriptException;
+
+public class RenjinProcessor implements ItemProcessor<InputData, OutputData> {
+
+    private final ScriptEngine engine = new RenjinScriptEngineFactory().getScriptEngine();
+
+    @Override
+    public OutputData process(InputData item) {
+        try {
+            // R 스크립트 실행
+            engine.put("input_data", item.getValue());
+            String rScript = "result <- input_data + 1";  // 간단한 R 스크립트 예시
+            engine.eval(rScript);
+            SEXP result = (SEXP) engine.eval("result");
+            return new OutputData(result.asDouble());
+        } catch (ScriptException e) {
+            throw new RuntimeException("Error executing R script", e);
+        }
+    }
+}
+```
+
+### 5. **실행 방법**
+
+이제 설정이 완료되었습니다. 다음 명령어로 컨테이너를 빌드하고 실행할 수 있습니다.
+
+```bash
+# Docker 이미지 빌드
+docker-compose build
+
+# Docker 컨테이너 실행
+docker-compose up
+```
+
+### 요약
+
+위의 설정을 통해 Spring Batch와 Renjin 엔진을 사용하는 대용량 처리 시스템을 Docker 컨테이너 내에서 효율적으로 운영할 수 있습니다. 이 구성은 성능을 최적화하고, 멀티스레드 처리를 지원하며, R 스크립트를 쉽게 실행할 수 있는 환경을 제공합니다.
+
